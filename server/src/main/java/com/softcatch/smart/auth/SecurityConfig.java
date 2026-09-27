@@ -1,0 +1,34 @@
+package com.softcatch.smart.auth;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.web.SecurityFilterChain;
+
+// /api/v1/auth/**만 열고 나머지 /api/**는 Bearer 토큰을 요구한다.
+// 쿠키를 쓰지 않으므로 CSRF는 해당 없음(범위 원칙). 세션 없음(JWT라 STATELESS).
+// 페이지 보호(비로그인 차단)는 범위 밖 — JSP·정적 자원은 그대로 연다.
+@Configuration
+@EnableWebSecurity
+class SecurityConfig {
+
+  @Bean
+  SecurityFilterChain securityFilterChain(HttpSecurity http, JwtDecoder jwtDecoder)
+      throws Exception {
+    return http.csrf(csrf -> csrf.disable())
+        .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        .authorizeHttpRequests(
+            auth ->
+                auth.requestMatchers("/api/v1/auth/**")
+                    .permitAll()
+                    .requestMatchers("/api/**")
+                    .authenticated()
+                    .anyRequest()
+                    .permitAll())
+        .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(jwtDecoder)))
+        .build();
+  }
+}
