@@ -8,6 +8,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -17,6 +18,10 @@ class AccountController {
   record AccountResponse(Long accountId, String accountNumber, Long balance, boolean primary) {}
 
   record PrimaryResponse(Long accountId, boolean primary) {}
+
+  record ChargeRequest(Long amount) {}
+
+  record ChargeResponse(Long accountId, Long balance) {}
 
   private final AccountService accountService;
 
@@ -44,5 +49,16 @@ class AccountController {
     Account account = accountService.changePrimary(Long.valueOf(jwt.getSubject()), accountId);
     return ResponseEntity.ok(
         ApiResponse.ok(new PrimaryResponse(account.getId(), account.isPrimary())));
+  }
+
+  @PostMapping("/api/v1/accounts/{accountId}/charge")
+  ResponseEntity<ApiResponse<ChargeResponse>> charge(
+      @AuthenticationPrincipal Jwt jwt,
+      @PathVariable Long accountId,
+      @RequestBody ChargeRequest request) {
+    Account account =
+        accountService.charge(Long.valueOf(jwt.getSubject()), accountId, request.amount());
+    return ResponseEntity.ok(
+        ApiResponse.ok(new ChargeResponse(account.getId(), account.getBalance())));
   }
 }
