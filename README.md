@@ -12,6 +12,16 @@ AI 채팅으로 송금하고, DART 공시를 검색·분석하는 서비스.
 
 **기술 스택**: JSP · Spring Boot 4.1.1(Java 17, JPA, JWT) · FastAPI + LangGraph · OpenAI · PostgreSQL + pgvector · Docker Compose
 
+## 로컬 실행
+
+```bash
+cp .env.example .env        # 비밀번호 바꾸기
+docker compose up -d --build
+curl localhost:8080/actuator/health
+```
+
+FastAPI(`ai`)는 내부 전용이라 포트를 열지 않는다. Spring만 `http://ai:8000`으로 호출한다.
+
 ## 문서
 
 - [개요](docs/smart-overview.md) — 목적, 로드맵, 가드레일, 테스트 전략, 아키텍처
