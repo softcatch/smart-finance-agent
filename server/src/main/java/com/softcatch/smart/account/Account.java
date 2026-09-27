@@ -40,6 +40,10 @@ public class Account {
     return accountNumber;
   }
 
+  public Long getBalance() {
+    return balance;
+  }
+
   public boolean isPrimary() {
     return isPrimary;
   }

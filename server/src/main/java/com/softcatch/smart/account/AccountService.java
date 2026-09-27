@@ -39,7 +39,7 @@ class AccountService {
   }
 
   @Transactional
-  void changePrimary(Long memberId, Long accountId) {
+  Account changePrimary(Long memberId, Long accountId) {
     // 계좌 개설과 같은 잠금 포인트 — 두 API가 같은 회원 기준으로 서로 직렬화된다.
     members.findForUpdateById(memberId);
 
@@ -53,5 +53,6 @@ class AccountService {
 
     accounts.findByMemberIdAndIsPrimaryTrue(memberId).ifPresent(Account::clearPrimary);
     target.markPrimary();
+    return target;
   }
 }

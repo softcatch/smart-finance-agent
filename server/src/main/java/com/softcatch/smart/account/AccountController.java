@@ -14,7 +14,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 class AccountController {
 
-  record AccountResponse(Long accountId, String accountNumber, boolean primary) {}
+  record AccountResponse(Long accountId, String accountNumber, Long balance, boolean primary) {}
+
+  record PrimaryResponse(Long accountId, boolean primary) {}
 
   private final AccountService accountService;
 
@@ -30,13 +32,17 @@ class AccountController {
         .body(
             ApiResponse.ok(
                 new AccountResponse(
-                    account.getId(), account.getAccountNumber(), account.isPrimary())));
+                    account.getId(),
+                    account.getAccountNumber(),
+                    account.getBalance(),
+                    account.isPrimary())));
   }
 
   @PatchMapping("/api/v1/accounts/{accountId}/primary")
-  ResponseEntity<ApiResponse<Void>> changePrimary(
+  ResponseEntity<ApiResponse<PrimaryResponse>> changePrimary(
       @AuthenticationPrincipal Jwt jwt, @PathVariable Long accountId) {
-    accountService.changePrimary(Long.valueOf(jwt.getSubject()), accountId);
-    return ResponseEntity.ok(ApiResponse.ok(null));
+    Account account = accountService.changePrimary(Long.valueOf(jwt.getSubject()), accountId);
+    return ResponseEntity.ok(
+        ApiResponse.ok(new PrimaryResponse(account.getId(), account.isPrimary())));
   }
 }

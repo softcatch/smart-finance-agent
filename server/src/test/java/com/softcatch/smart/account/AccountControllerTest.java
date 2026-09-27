@@ -46,7 +46,8 @@ class AccountControllerTest {
                 .header("Authorization", "Bearer " + session.token())
                 .header("Idempotency-Key", UUID.randomUUID().toString()))
         .andExpect(MockMvcResultMatchers.status().isCreated())
-        .andExpect(MockMvcResultMatchers.jsonPath("$.data.primary").value(true));
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.primary").value(true))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.balance").value(0));
   }
 
   @Test
@@ -213,7 +214,9 @@ class AccountControllerTest {
         .perform(
             MockMvcRequestBuilders.patch("/api/v1/accounts/{id}/primary", accountId)
                 .header("Authorization", "Bearer " + token))
-        .andExpect(MockMvcResultMatchers.status().isOk());
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.accountId").value(accountId))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.primary").value(true));
   }
 
   private MemberSession signupAndLogin(String loginId, String password, String name)
