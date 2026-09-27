@@ -8,4 +8,6 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
   Optional<Account> findByMemberIdAndIdempotencyKey(Long memberId, String idempotencyKey);
 
   long countByMemberId(Long memberId);
+
+  Optional<Account> findByMemberIdAndIsPrimaryTrue(Long memberId);
 }

@@ -43,4 +43,12 @@ public class Account {
   public boolean isPrimary() {
     return isPrimary;
   }
+
+  void markPrimary() {
+    this.isPrimary = true;
+  }
+
+  void clearPrimary() {
+    this.isPrimary = false;
+  }
 }

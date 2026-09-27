@@ -1,6 +1,8 @@
 package com.softcatch.smart.account;
 
 import com.softcatch.smart.auth.MemberRepository;
+import com.softcatch.smart.common.ApiException;
+import com.softcatch.smart.common.ErrorCode;
 import java.security.SecureRandom;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,5 +36,22 @@ class AccountService {
     boolean primary = accounts.countByMemberId(memberId) == 0;
     String accountNumber = String.format("%012d", random.nextLong(ACCOUNT_NUMBER_BOUND));
     return accounts.save(new Account(memberId, accountNumber, idempotencyKey, primary));
+  }
+
+  @Transactional
+  void changePrimary(Long memberId, Long accountId) {
+    // 계좌 개설과 같은 잠금 포인트 — 두 API가 같은 회원 기준으로 서로 직렬화된다.
+    members.findForUpdateById(memberId);
+
+    Account target =
+        accounts
+            .findById(accountId)
+            .orElseThrow(() -> new ApiException(ErrorCode.ACCOUNT_NOT_FOUND));
+    if (!target.getMemberId().equals(memberId)) {
+      throw new ApiException(ErrorCode.ACCOUNT_NOT_OWNED);
+    }
+
+    accounts.findByMemberIdAndIsPrimaryTrue(memberId).ifPresent(Account::clearPrimary);
+    target.markPrimary();
   }
 }
