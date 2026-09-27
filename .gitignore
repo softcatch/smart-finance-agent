@@ -1,0 +1,26 @@
+# 비밀값
+.env
+.env.*
+!.env.example
+
+# Java / Gradle
+.gradle/
+build/
+out/
+*.class
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
