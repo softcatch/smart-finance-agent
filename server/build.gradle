@@ -27,6 +27,8 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-security-oauth2-resource-server'
 	implementation 'org.flywaydb:flyway-database-postgresql'
+	implementation 'org.apache.tomcat.embed:tomcat-embed-jasper'
+	implementation 'org.glassfish.web:jakarta.servlet.jsp.jstl:3.0.1'
 	runtimeOnly 'org.postgresql:postgresql'
 	providedRuntime 'org.springframework.boot:spring-boot-starter-tomcat-runtime'
 	testImplementation 'org.springframework.boot:spring-boot-starter-actuator-test'
