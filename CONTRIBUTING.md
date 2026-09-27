@@ -40,6 +40,15 @@ feat(auth): 로그인 JWT 발급 (#12)
 fix(transfer): 동시 송금 시 잔액 음수 방지 (#18)
 ```
 
+- **동작하는 기능 단위마다 커밋한다.** 커밋마다 빌드·테스트가 통과하는 상태여야 한다. PR 안의 커밋 순서가 곧 설계 순서다.
+
+  ```text
+  feat(auth): 회원 테이블 마이그레이션 (#3)
+  feat(auth): 회원가입 API — 비밀번호 BCrypt 저장 (#3)
+  feat(auth): 로그인 API — JWT 발급 (#3)
+  test(auth): 회원가입·로그인 통합 테스트 (#3)
+  ```
+
 - 요구사항 ID(FR·NFR)는 커밋이 아니라 이슈에 적는다.
 - 커밋·PR·이슈 어디에도 도구 서명(`Co-Authored-By`, "Generated with ..." 등)을 넣지 않는다.
 
