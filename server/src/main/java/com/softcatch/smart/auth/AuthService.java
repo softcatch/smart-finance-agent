@@ -4,6 +4,7 @@ import com.softcatch.smart.common.ApiException;
 import com.softcatch.smart.common.ErrorCode;
 import java.time.Instant;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
@@ -38,7 +39,12 @@ class AuthService {
             m -> {
               throw new ApiException(ErrorCode.DUPLICATE_LOGIN_ID);
             });
-    return members.save(new Member(loginId, passwordEncoder.encode(rawPassword), name)).getId();
+    try {
+      return members.save(new Member(loginId, passwordEncoder.encode(rawPassword), name)).getId();
+    } catch (DataIntegrityViolationException e) {
+      // 동시 가입 요청이 사전 조회를 함께 통과한 경우 — UNIQUE 제약 위반을 409로 변환한다.
+      throw new ApiException(ErrorCode.DUPLICATE_LOGIN_ID);
+    }
   }
 
   String login(String loginId, String rawPassword) {
