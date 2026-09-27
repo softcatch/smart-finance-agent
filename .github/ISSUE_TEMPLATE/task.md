@@ -5,6 +5,8 @@ title: ""
 labels: ""
 ---
 
+<!-- 제목 맨 앞에 [Feat]/[Fix]/[Docs]/[Refactor]/[Test]/[Chore] 중 하나를 붙인다 -->
+
 ## 목적
 <!-- 무엇을, 왜 하는지 -->
 

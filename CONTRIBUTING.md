@@ -54,7 +54,15 @@ fix(transfer): 동시 송금 시 잔액 음수 방지 (#18)
 
 ## 이슈
 
-`.github/ISSUE_TEMPLATE/task.md` 순서대로 쓴다.
+**제목**: `[Feat]`·`[Fix]`·`[Docs]`·`[Refactor]`·`[Test]`·`[Chore]` 중 하나를
+맨 앞에 붙인다(브랜치·커밋의 type과 같은 기준 — 위 표 참고).
+
+```text
+[Feat] 가상계좌 개설·대표 계좌
+[Fix] 동시 송금 시 잔액 음수 방지
+```
+
+본문은 `.github/ISSUE_TEMPLATE/task.md` 순서대로 쓴다.
 
 ```text
 목적 → 관련 요구사항(FR·NFR) → 영향 범위 → 완료 조건 → 참고사항
