@@ -207,6 +207,21 @@ postgres_exporter (커넥션·락 대기) ────────────�
 cAdvisor (컨테이너 CPU·메모리) ───────────────────────┘
 ```
 
+### E2E 테스트(JSP 화면)
+
+- **도구**: Playwright for Java. 서버(Java/Gradle)·AI(Python) 둘뿐인 프로젝트에
+  세 번째 언어 툴체인(Cypress 등)을 또 들이지 않는다 — 기존 JUnit 5 테스트와
+  같은 언어·같은 명령(`./gradlew test`)으로 돈다. 브라우저 바이너리를 자동
+  설치해서 별도 드라이버 관리가 거의 없다(Selenium 대비 장점).
+- **실행 방식**: `@SpringBootTest(webEnvironment = RANDOM_PORT)`로 실제
+  서버를 띄우고, 기존 `TestcontainersConfiguration`(PostgreSQL)을 그대로
+  재사용해 Playwright가 그 포트에 브라우저로 접속한다. 새 인프라를 안 만들고
+  이미 있는 테스트 기반 위에 얹는다.
+- **범위**: 화면(JSP)이 있는 기능부터 순서대로 채운다. 지금은
+  회원가입 → 로그인뿐이라 그 플로우만 만든다. 계좌·송금 등 JSP가 아직 없는
+  기능은 API 통합 테스트로 충분하고, JSP가 생기는 시점에 그 이슈에서 E2E도
+  같이 추가한다(AGENTS.md 참고).
+
 ## 7. 추가 기능 (추후)
 
 - 송금 PIN·한도

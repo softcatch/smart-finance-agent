@@ -14,6 +14,7 @@
 - `main`에 직접 커밋하지 않는다. `<type>/#<이슈>-<설명>` 브랜치에서 커밋까지 한다.
 - 예외: 문서(`docs/`와 `*.md`)만 바꾸는 작업은 PR 없이 `main`에 바로 커밋한다. 코드와 함께 바뀌는 문서는 그 코드 PR에 넣는다.
 - 동작하는 기능 단위마다 커밋한다. 커밋마다 빌드·테스트가 통과해야 한다.
+- JSP 화면이 있는 기능은 완료 조건에 E2E 테스트(Playwright for Java)도 포함한다 — 방식은 [`docs/smart-overview.md`](docs/smart-overview.md) 6절 참고.
 - push·PR 승인·머지는 사람이 한다. PR 본문은 템플릿 순서대로 작성해 건넨다.
 - 브랜치·커밋·이슈·PR 형식은 [`CONTRIBUTING.md`](CONTRIBUTING.md)를 따른다.
 - 커밋·PR·이슈에 도구 서명(`Co-Authored-By`, "Generated with ..." 등)을 넣지 않는다.
