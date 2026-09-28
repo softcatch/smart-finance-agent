@@ -7,6 +7,7 @@ import com.softcatch.smart.auth.MemberRepository;
 import com.softcatch.smart.common.ApiException;
 import com.softcatch.smart.common.ErrorCode;
 import com.softcatch.smart.transfer.dto.request.TransferCreateRequest;
+import com.softcatch.smart.transfer.dto.response.TransferConfirmResponse;
 import com.softcatch.smart.transfer.dto.response.TransferCreateResponse;
 import java.time.Duration;
 import java.time.Instant;
@@ -83,5 +84,52 @@ class TransferService {
         .findByMemberIdAndAlias(senderMemberId, request.alias())
         .map(alias -> alias.getAccountNumber())
         .orElseThrow(() -> new ApiException(ErrorCode.ALIAS_NOT_FOUND));
+  }
+
+  @Transactional
+  TransferConfirmResponse confirm(Long callerMemberId, String requestId) {
+    TransferRequest request =
+        transferRequests
+            .findByRequestId(requestId)
+            .filter(r -> r.getSenderMemberId().equals(callerMemberId))
+            .orElseThrow(() -> new ApiException(ErrorCode.TRANSFER_REQUEST_NOT_FOUND));
+
+    if (Instant.now().isAfter(request.getExpiresAt())) {
+      throw new ApiException(ErrorCode.TRANSFER_REQUEST_EXPIRED);
+    }
+
+    if (transferRequests.markUsedIfNotUsed(requestId) == 0) {
+      throw new ApiException(ErrorCode.TRANSFER_REQUEST_ALREADY_USED);
+    }
+
+    Account fromAccount =
+        accounts.findByAccountNumber(request.getFromAccountNumber()).orElseThrow();
+    if (!fromAccount.getMemberId().equals(callerMemberId)) {
+      throw new ApiException(ErrorCode.ACCOUNT_NOT_OWNED);
+    }
+
+    if (accounts.decreaseBalanceIfSufficient(fromAccount.getId(), request.getAmount()) == 0) {
+      throw new ApiException(ErrorCode.INSUFFICIENT_BALANCE);
+    }
+
+    Account toAccount =
+        accounts.findByAccountNumber(request.getRecipientAccountNumber()).orElseThrow();
+    accounts.increaseBalance(toAccount.getId(), request.getAmount());
+
+    Transfer saved =
+        transfers.save(
+            new Transfer(
+                request.getFromAccountNumber(),
+                request.getRecipientAccountNumber(),
+                request.getAmount()));
+
+    Long balanceAfter = accounts.findById(fromAccount.getId()).orElseThrow().getBalance();
+
+    return new TransferConfirmResponse(
+        saved.getId(),
+        request.getRecipientName(),
+        request.getAmount(),
+        request.getFromAccountNumber(),
+        balanceAfter);
   }
 }

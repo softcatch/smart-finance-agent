@@ -8,7 +8,11 @@ public enum ErrorCode {
   ACCOUNT_NOT_FOUND(HttpStatus.NOT_FOUND, "계좌를 찾을 수 없습니다"),
   ACCOUNT_NOT_OWNED(HttpStatus.FORBIDDEN, "본인 계좌가 아닙니다"),
   INVALID_AMOUNT(HttpStatus.BAD_REQUEST, "충전 금액은 0보다 커야 합니다"),
-  ALIAS_NOT_FOUND(HttpStatus.NOT_FOUND, "등록되지 않은 별칭입니다");
+  ALIAS_NOT_FOUND(HttpStatus.NOT_FOUND, "등록되지 않은 별칭입니다"),
+  TRANSFER_REQUEST_NOT_FOUND(HttpStatus.NOT_FOUND, "송금 요청을 찾을 수 없습니다"),
+  TRANSFER_REQUEST_EXPIRED(HttpStatus.GONE, "송금 요청이 만료되었습니다"),
+  TRANSFER_REQUEST_ALREADY_USED(HttpStatus.CONFLICT, "이미 확정된 송금 요청입니다"),
+  INSUFFICIENT_BALANCE(HttpStatus.CONFLICT, "잔액이 부족합니다");
 
   final HttpStatus status;
   final String message;
