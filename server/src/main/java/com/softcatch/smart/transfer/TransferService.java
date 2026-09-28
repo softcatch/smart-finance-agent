@@ -41,6 +41,10 @@ class TransferService {
 
   @Transactional
   TransferCreateResponse createRequest(Long senderMemberId, TransferCreateRequest request) {
+    if (request.amount() == null || request.amount() <= 0) {
+      throw new ApiException(ErrorCode.INVALID_AMOUNT);
+    }
+
     String targetAccountNumber = resolveTargetAccountNumber(senderMemberId, request);
 
     Account recipientAccount =
@@ -108,13 +112,17 @@ class TransferService {
       throw new ApiException(ErrorCode.ACCOUNT_NOT_OWNED);
     }
 
-    if (accounts.decreaseBalanceIfSufficient(fromAccount.getId(), request.getAmount()) == 0) {
-      throw new ApiException(ErrorCode.INSUFFICIENT_BALANCE);
-    }
-
     Account toAccount =
         accounts.findByAccountNumber(request.getRecipientAccountNumber()).orElseThrow();
-    accounts.increaseBalance(toAccount.getId(), request.getAmount());
+
+    // 두 계좌를 항상 id 오름차순으로 갱신한다 — A→B와 B→A가 동시에 확정되면 반대 순서로
+    // 잠갔을 때 서로의 행을 기다리며 교착 상태(deadlock)가 나는데, 순서를 고정하면
+    // 두 트랜잭션이 같은 행부터 순서대로 줄을 서서 교착이 안 생긴다.
+    if (fromAccount.getId() < toAccount.getId()) {
+      decreaseThenIncrease(fromAccount.getId(), toAccount.getId(), request.getAmount());
+    } else {
+      increaseThenDecrease(fromAccount.getId(), toAccount.getId(), request.getAmount());
+    }
 
     Transfer saved =
         transfers.save(
@@ -131,5 +139,19 @@ class TransferService {
         request.getAmount(),
         request.getFromAccountNumber(),
         balanceAfter);
+  }
+
+  private void decreaseThenIncrease(Long fromAccountId, Long toAccountId, Long amount) {
+    if (accounts.decreaseBalanceIfSufficient(fromAccountId, amount) == 0) {
+      throw new ApiException(ErrorCode.INSUFFICIENT_BALANCE);
+    }
+    accounts.increaseBalance(toAccountId, amount);
+  }
+
+  private void increaseThenDecrease(Long fromAccountId, Long toAccountId, Long amount) {
+    accounts.increaseBalance(toAccountId, amount);
+    if (accounts.decreaseBalanceIfSufficient(fromAccountId, amount) == 0) {
+      throw new ApiException(ErrorCode.INSUFFICIENT_BALANCE);
+    }
   }
 }

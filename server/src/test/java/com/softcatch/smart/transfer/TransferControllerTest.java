@@ -126,6 +126,26 @@ class TransferControllerTest {
   }
 
   @Test
+  void 요청_생성_금액이_0이하면_400() throws Exception {
+    MemberSession recipient = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "수취인0");
+    AccountInfo recipientAccount = openAccount(recipient.token());
+
+    MemberSession sender = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "발신자0");
+    openAccount(sender.token());
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.post("/internal/transfer-requests")
+                .header("Authorization", "Bearer " + sender.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    json.writeValueAsString(
+                        new TransferCreateRequest(recipientAccount.accountNumber(), null, -1000L))))
+        .andExpect(MockMvcResultMatchers.status().isBadRequest())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("INVALID_AMOUNT"));
+  }
+
+  @Test
   void 확정_성공() throws Exception {
     MemberSession recipient = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "수취인1");
     AccountInfo recipientAccount = openAccount(recipient.token());
@@ -381,6 +401,51 @@ class TransferControllerTest {
     Assertions.assertEquals(5, successCount);
     Account senderAcc = accounts.findByAccountNumber(senderAccount.accountNumber()).orElseThrow();
     Assertions.assertEquals(0L, senderAcc.getBalance());
+  }
+
+  @Test
+  void 반대_방향_동시_송금은_교착_없이_둘_다_성공() throws Exception {
+    MemberSession memberA = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "A");
+    AccountInfo accountA = openAccount(memberA.token());
+    charge(memberA.token(), accountA.accountId(), 10000L);
+
+    MemberSession memberB = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "B");
+    AccountInfo accountB = openAccount(memberB.token());
+    charge(memberB.token(), accountB.accountId(), 10000L);
+
+    // A→B 3000원, B→A 2000원을 동시에 확정한다. 잠금 순서가 방향마다 다르면
+    // (A를 먼저 잠그는 트랜잭션과 B를 먼저 잠그는 트랜잭션이 서로를 기다리며) 교착 상태가
+    // 나서 한쪽이 예외로 끝난다 — id 순서로 고정한 뒤에는 항상 둘 다 성공해야 한다.
+    String requestAtoB =
+        createTransferRequest(memberA.token(), accountB.accountNumber(), null, 3000L);
+    String requestBtoA =
+        createTransferRequest(memberB.token(), accountA.accountNumber(), null, 2000L);
+
+    CyclicBarrier barrier = new CyclicBarrier(2);
+    Callable<Boolean> confirmAtoB =
+        () -> {
+          barrier.await();
+          transferService.confirm(memberA.memberId(), requestAtoB);
+          return true;
+        };
+    Callable<Boolean> confirmBtoA =
+        () -> {
+          barrier.await();
+          transferService.confirm(memberB.memberId(), requestBtoA);
+          return true;
+        };
+
+    ExecutorService pool = Executors.newFixedThreadPool(2);
+    Future<Boolean> first = pool.submit(confirmAtoB);
+    Future<Boolean> second = pool.submit(confirmBtoA);
+    Assertions.assertTrue(first.get());
+    Assertions.assertTrue(second.get());
+    pool.shutdown();
+
+    Account finalA = accounts.findByAccountNumber(accountA.accountNumber()).orElseThrow();
+    Account finalB = accounts.findByAccountNumber(accountB.accountNumber()).orElseThrow();
+    Assertions.assertEquals(9000L, finalA.getBalance()); // 10000 - 3000 + 2000
+    Assertions.assertEquals(11000L, finalB.getBalance()); // 10000 - 2000 + 3000
   }
 
   private AccountInfo openAccount(String token) throws Exception {
