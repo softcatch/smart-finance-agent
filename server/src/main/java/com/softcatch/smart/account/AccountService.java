@@ -4,6 +4,7 @@ import com.softcatch.smart.auth.MemberRepository;
 import com.softcatch.smart.common.ApiException;
 import com.softcatch.smart.common.ErrorCode;
 import java.security.SecureRandom;
+import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -73,5 +74,9 @@ class AccountService {
     // UPDATE 자체가 원자적이라 잠금 없이도 동시 충전에서 값이 안 유실된다.
     accounts.increaseBalance(accountId, amount);
     return accounts.findById(accountId).orElseThrow();
+  }
+
+  List<Account> list(Long memberId) {
+    return accounts.findByMemberIdOrderByIdAsc(memberId);
   }
 }
