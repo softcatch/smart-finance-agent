@@ -18,6 +18,8 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v6
+      # Playwright가 크로미움을 실행하려면 리눅스 시스템 패키지가 필요하다(sudo, ubuntu-latest만 해당)
+      - run: ./gradlew playwrightInstallDeps
       # 테스트는 Testcontainers(pgvector)로 실제 PostgreSQL에서 돈다
       - run: ./gradlew spotlessCheck test
 

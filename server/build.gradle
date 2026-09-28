@@ -50,10 +50,19 @@ tasks.named('test') {
 
 // Playwright는 브라우저를 따로 설치해야 한다 — test 태스크가 이 태스크에 의존해서
 // ./gradlew test 한 번이면 로컬·CI 어디서든 자동으로 설치된다.
+// --with-deps는 apt-get으로 리눅스 시스템 패키지까지 설치해서 sudo가 필요하다 —
+// 권한 없는 로컬 환경에서 매 test 실행마다 실패하지 않도록 여기선 브라우저만 설치한다.
 tasks.register('playwrightInstall', JavaExec) {
 	classpath = sourceSets.test.runtimeClasspath
 	mainClass = 'com.microsoft.playwright.CLI'
-	args = ['install', 'chromium', '--with-deps']
+	args = ['install', 'chromium']
+}
+
+// 리눅스 시스템 의존성 설치(sudo 필요)는 test에 걸지 않고, CI에서만 별도로 실행한다.
+tasks.register('playwrightInstallDeps', JavaExec) {
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.microsoft.playwright.CLI'
+	args = ['install-deps', 'chromium']
 }
 
 spotless {
