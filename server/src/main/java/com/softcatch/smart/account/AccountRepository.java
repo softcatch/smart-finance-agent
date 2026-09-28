@@ -23,4 +23,12 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
   @Modifying(clearAutomatically = true)
   @Query("UPDATE Account a SET a.balance = a.balance + :amount WHERE a.id = :id")
   void increaseBalance(Long id, Long amount);
+
+  // 잔액이 충분할 때만 차감 — 조건이 WHERE에 있어 읽고-나중에-빼는 틈(lost update)이 없다.
+  // 영향받은 행이 0이면 잔액 부족(동시 송금으로 그새 부족해진 경우 포함).
+  @Modifying(clearAutomatically = true)
+  @Query(
+      "UPDATE Account a SET a.balance = a.balance - :amount "
+          + "WHERE a.id = :id AND a.balance >= :amount")
+  int decreaseBalanceIfSufficient(Long id, Long amount);
 }
