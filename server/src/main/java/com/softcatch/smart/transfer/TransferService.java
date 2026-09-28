@@ -9,9 +9,13 @@ import com.softcatch.smart.common.ErrorCode;
 import com.softcatch.smart.transfer.dto.request.TransferCreateRequest;
 import com.softcatch.smart.transfer.dto.response.TransferConfirmResponse;
 import com.softcatch.smart.transfer.dto.response.TransferCreateResponse;
+import com.softcatch.smart.transfer.dto.response.TransferHistoryItem;
+import com.softcatch.smart.transfer.dto.response.TransferHistoryListResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 class TransferService {
 
   private static final Duration REQUEST_TTL = Duration.ofMinutes(5);
+  private static final int DEFAULT_PAGE_SIZE = 20;
 
   private final TransferRequestRepository transferRequests;
   private final TransferRepository transfers;
@@ -153,5 +158,19 @@ class TransferService {
     if (accounts.decreaseBalanceIfSufficient(fromAccountId, amount) == 0) {
       throw new ApiException(ErrorCode.INSUFFICIENT_BALANCE);
     }
+  }
+
+  TransferHistoryListResponse list(Long memberId, Long cursor, Integer size) {
+    int pageSize = size != null ? size : DEFAULT_PAGE_SIZE;
+
+    // size보다 하나 더 가져와서, 남는 게 있으면 hasNext=true로 판단한다.
+    List<TransferHistoryItem> rows =
+        transfers.findHistory(memberId, cursor, Pageable.ofSize(pageSize + 1));
+
+    boolean hasNext = rows.size() > pageSize;
+    List<TransferHistoryItem> items = hasNext ? rows.subList(0, pageSize) : rows;
+    Long nextCursor = hasNext ? items.get(items.size() - 1).transferId() : null;
+
+    return new TransferHistoryListResponse(items, nextCursor, hasNext);
   }
 }
