@@ -304,6 +304,10 @@ class AccountControllerTest {
     MemberSession session = signupAndLogin("acc" + System.nanoTime(), "pw12345!", "목록1");
     Long first = openAccount(session.token(), UUID.randomUUID().toString());
     Long second = openAccount(session.token(), UUID.randomUUID().toString());
+    accountService.charge(session.memberId(), first, 1500L);
+
+    String firstAccountNumber = accounts.findById(first).orElseThrow().getAccountNumber();
+    String secondAccountNumber = accounts.findById(second).orElseThrow().getAccountNumber();
 
     mockMvc
         .perform(
@@ -312,8 +316,16 @@ class AccountControllerTest {
         .andExpect(MockMvcResultMatchers.status().isOk())
         .andExpect(MockMvcResultMatchers.jsonPath("$.data.accounts.length()").value(2))
         .andExpect(MockMvcResultMatchers.jsonPath("$.data.accounts[0].accountId").value(first))
+        .andExpect(
+            MockMvcResultMatchers.jsonPath("$.data.accounts[0].accountNumber")
+                .value(firstAccountNumber))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.accounts[0].balance").value(1500))
         .andExpect(MockMvcResultMatchers.jsonPath("$.data.accounts[0].primary").value(true))
         .andExpect(MockMvcResultMatchers.jsonPath("$.data.accounts[1].accountId").value(second))
+        .andExpect(
+            MockMvcResultMatchers.jsonPath("$.data.accounts[1].accountNumber")
+                .value(secondAccountNumber))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.accounts[1].balance").value(0))
         .andExpect(MockMvcResultMatchers.jsonPath("$.data.accounts[1].primary").value(false));
   }
 
