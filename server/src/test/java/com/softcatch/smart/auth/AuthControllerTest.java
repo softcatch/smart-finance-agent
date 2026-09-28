@@ -3,6 +3,8 @@ package com.softcatch.smart.auth;
 import static org.hamcrest.Matchers.not;
 
 import com.softcatch.smart.TestcontainersConfiguration;
+import com.softcatch.smart.auth.dto.request.LoginRequest;
+import com.softcatch.smart.auth.dto.request.SignupRequest;
 import com.softcatch.smart.common.ApiException;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -71,9 +73,7 @@ class AuthControllerTest {
         .perform(
             MockMvcRequestBuilders.post("/api/v1/auth/signup")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    json.writeValueAsString(
-                        new AuthController.SignupRequest("dup01", "pw12345!", "김철수"))))
+                .content(json.writeValueAsString(new SignupRequest("dup01", "pw12345!", "김철수"))))
         .andExpect(MockMvcResultMatchers.status().isConflict())
         .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("DUPLICATE_LOGIN_ID"));
   }
@@ -86,8 +86,7 @@ class AuthControllerTest {
         .perform(
             MockMvcRequestBuilders.post("/api/v1/auth/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    json.writeValueAsString(new AuthController.LoginRequest("wrongpw01", "다른비번"))))
+                .content(json.writeValueAsString(new LoginRequest("wrongpw01", "다른비번"))))
         .andExpect(MockMvcResultMatchers.status().isUnauthorized())
         .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("AUTH_INVALID"));
   }
@@ -128,9 +127,7 @@ class AuthControllerTest {
         .perform(
             MockMvcRequestBuilders.post("/api/v1/auth/signup")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    json.writeValueAsString(
-                        new AuthController.SignupRequest(loginId, password, name))))
+                .content(json.writeValueAsString(new SignupRequest(loginId, password, name))))
         .andExpect(MockMvcResultMatchers.status().isCreated());
   }
 
@@ -140,9 +137,7 @@ class AuthControllerTest {
             .perform(
                 MockMvcRequestBuilders.post("/api/v1/auth/login")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content(
-                        json.writeValueAsString(
-                            new AuthController.LoginRequest(loginId, password))))
+                    .content(json.writeValueAsString(new LoginRequest(loginId, password))))
             .andExpect(MockMvcResultMatchers.status().isOk())
             .andReturn()
             .getResponse()

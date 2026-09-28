@@ -1,5 +1,9 @@
 package com.softcatch.smart.account;
 
+import com.softcatch.smart.account.dto.request.ChargeRequest;
+import com.softcatch.smart.account.dto.response.AccountResponse;
+import com.softcatch.smart.account.dto.response.ChargeResponse;
+import com.softcatch.smart.account.dto.response.PrimaryResponse;
 import com.softcatch.smart.common.ApiResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -14,14 +18,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 class AccountController {
-
-  record AccountResponse(Long accountId, String accountNumber, Long balance, boolean primary) {}
-
-  record PrimaryResponse(Long accountId, boolean primary) {}
-
-  record ChargeRequest(Long amount) {}
-
-  record ChargeResponse(Long accountId, Long balance) {}
 
   private final AccountService accountService;
 
