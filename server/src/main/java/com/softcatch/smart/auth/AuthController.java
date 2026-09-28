@@ -1,5 +1,9 @@
 package com.softcatch.smart.auth;
 
+import com.softcatch.smart.auth.dto.request.LoginRequest;
+import com.softcatch.smart.auth.dto.request.SignupRequest;
+import com.softcatch.smart.auth.dto.response.LoginResponse;
+import com.softcatch.smart.auth.dto.response.SignupResponse;
 import com.softcatch.smart.common.ApiResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -9,14 +13,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 class AuthController {
-
-  record SignupRequest(String loginId, String password, String name) {}
-
-  record SignupResponse(Long memberId) {}
-
-  record LoginRequest(String loginId, String password) {}
-
-  record LoginResponse(String accessToken) {}
 
   private final AuthService authService;
 
