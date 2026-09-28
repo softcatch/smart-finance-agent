@@ -39,11 +39,21 @@ dependencies {
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
 	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
 	testImplementation 'org.testcontainers:testcontainers-postgresql'
+	testImplementation 'com.microsoft.playwright:playwright:1.52.0'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 tasks.named('test') {
 	useJUnitPlatform()
+	dependsOn 'playwrightInstall'
+}
+
+// Playwright는 브라우저를 따로 설치해야 한다 — test 태스크가 이 태스크에 의존해서
+// ./gradlew test 한 번이면 로컬·CI 어디서든 자동으로 설치된다.
+tasks.register('playwrightInstall', JavaExec) {
+	classpath = sourceSets.test.runtimeClasspath
+	mainClass = 'com.microsoft.playwright.CLI'
+	args = ['install', 'chromium', '--with-deps']
 }
 
 spotless {
