@@ -31,15 +31,7 @@ class AliasService {
   }
 
   List<AliasResponse> list(Long memberId) {
-    return aliases.findByMemberIdOrderByIdAsc(memberId).stream()
-        .map(
-            alias ->
-                new AliasResponse(
-                    alias.getId(),
-                    alias.getAlias(),
-                    alias.getAccountNumber(),
-                    resolveOwnerName(alias.getAccountNumber())))
-        .toList();
+    return aliases.findResponsesByMemberId(memberId);
   }
 
   private String resolveOwnerName(String accountNumber) {
