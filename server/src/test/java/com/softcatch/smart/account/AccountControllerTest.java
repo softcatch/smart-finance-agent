@@ -1,6 +1,7 @@
 package com.softcatch.smart.account;
 
 import com.softcatch.smart.TestcontainersConfiguration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -30,6 +31,8 @@ class AccountControllerTest {
   private record SignupRequest(String loginId, String password, String name) {}
 
   private record LoginRequest(String loginId, String password) {}
+
+  private record ChargeRequest(Long amount) {}
 
   @Autowired private MockMvc mockMvc;
   @Autowired private AccountService accountService;
@@ -193,6 +196,110 @@ class AccountControllerTest {
             .filter(a -> a.getMemberId().equals(session.memberId()) && a.isPrimary())
             .count();
     Assertions.assertEquals(1, primaryCount);
+  }
+
+  @Test
+  void 충전_성공() throws Exception {
+    MemberSession session = signupAndLogin("acc" + System.nanoTime(), "pw12345!", "충전1");
+    Long accountId = openAccount(session.token(), UUID.randomUUID().toString());
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.post("/api/v1/accounts/{id}/charge", accountId)
+                .header("Authorization", "Bearer " + session.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new ChargeRequest(1000L))))
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.accountId").value(accountId))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.balance").value(1000));
+
+    Assertions.assertEquals(1000L, accounts.findById(accountId).orElseThrow().getBalance());
+  }
+
+  @Test
+  void 충전_금액이_0이하면_잔액_변경없이_400() throws Exception {
+    MemberSession session = signupAndLogin("acc" + System.nanoTime(), "pw12345!", "충전음수");
+    Long accountId = openAccount(session.token(), UUID.randomUUID().toString());
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.post("/api/v1/accounts/{id}/charge", accountId)
+                .header("Authorization", "Bearer " + session.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new ChargeRequest(-1000L))))
+        .andExpect(MockMvcResultMatchers.status().isBadRequest())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("INVALID_AMOUNT"));
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.post("/api/v1/accounts/{id}/charge", accountId)
+                .header("Authorization", "Bearer " + session.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new ChargeRequest(0L))))
+        .andExpect(MockMvcResultMatchers.status().isBadRequest())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("INVALID_AMOUNT"));
+
+    Assertions.assertEquals(0L, accounts.findById(accountId).orElseThrow().getBalance());
+  }
+
+  @Test
+  void 충전_소유자_아니면_403() throws Exception {
+    MemberSession owner = signupAndLogin("acc" + System.nanoTime(), "pw12345!", "충전2A");
+    Long accountId = openAccount(owner.token(), UUID.randomUUID().toString());
+
+    MemberSession stranger = signupAndLogin("acc" + System.nanoTime(), "pw12345!", "충전2B");
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.post("/api/v1/accounts/{id}/charge", accountId)
+                .header("Authorization", "Bearer " + stranger.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new ChargeRequest(1000L))))
+        .andExpect(MockMvcResultMatchers.status().isForbidden())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("ACCOUNT_NOT_OWNED"));
+  }
+
+  @Test
+  void 충전_없는_계좌면_404() throws Exception {
+    MemberSession session = signupAndLogin("acc" + System.nanoTime(), "pw12345!", "충전3");
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.post("/api/v1/accounts/{id}/charge", 999_999_999L)
+                .header("Authorization", "Bearer " + session.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new ChargeRequest(1000L))))
+        .andExpect(MockMvcResultMatchers.status().isNotFound())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("ACCOUNT_NOT_FOUND"));
+  }
+
+  @Test
+  void 동시_충전_후_잔액이_합계와_일치() throws Exception {
+    MemberSession session = signupAndLogin("acc" + System.nanoTime(), "pw12345!", "동시충전");
+    Long accountId = openAccount(session.token(), UUID.randomUUID().toString());
+
+    int threads = 10;
+    long amountEach = 1000L;
+    CyclicBarrier barrier = new CyclicBarrier(threads);
+    Callable<Void> attempt =
+        () -> {
+          barrier.await();
+          accountService.charge(session.memberId(), accountId, amountEach);
+          return null;
+        };
+
+    ExecutorService pool = Executors.newFixedThreadPool(threads);
+    List<Future<Void>> futures = new ArrayList<>();
+    for (int i = 0; i < threads; i++) {
+      futures.add(pool.submit(attempt));
+    }
+    for (Future<Void> future : futures) {
+      future.get();
+    }
+    pool.shutdown();
+
+    Assertions.assertEquals(
+        threads * amountEach, accounts.findById(accountId).orElseThrow().getBalance());
   }
 
   private Long openAccount(String token, String idempotencyKey) throws Exception {

@@ -55,4 +55,23 @@ class AccountService {
     target.markPrimary();
     return target;
   }
+
+  @Transactional
+  Account charge(Long memberId, Long accountId, Long amount) {
+    if (amount == null || amount <= 0) {
+      throw new ApiException(ErrorCode.INVALID_AMOUNT);
+    }
+
+    Account account =
+        accounts
+            .findById(accountId)
+            .orElseThrow(() -> new ApiException(ErrorCode.ACCOUNT_NOT_FOUND));
+    if (!account.getMemberId().equals(memberId)) {
+      throw new ApiException(ErrorCode.ACCOUNT_NOT_OWNED);
+    }
+
+    // UPDATE 자체가 원자적이라 잠금 없이도 동시 충전에서 값이 안 유실된다.
+    accounts.increaseBalance(accountId, amount);
+    return accounts.findById(accountId).orElseThrow();
+  }
 }
