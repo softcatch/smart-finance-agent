@@ -1,6 +1,9 @@
 package com.softcatch.smart.account;
 
 import com.softcatch.smart.TestcontainersConfiguration;
+import com.softcatch.smart.account.dto.request.ChargeRequest;
+import com.softcatch.smart.auth.dto.request.LoginRequest;
+import com.softcatch.smart.auth.dto.request.SignupRequest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -27,12 +30,6 @@ import tools.jackson.databind.ObjectMapper;
 class AccountControllerTest {
 
   private record MemberSession(Long memberId, String token) {}
-
-  private record SignupRequest(String loginId, String password, String name) {}
-
-  private record LoginRequest(String loginId, String password) {}
-
-  private record ChargeRequest(Long amount) {}
 
   @Autowired private MockMvc mockMvc;
   @Autowired private AccountService accountService;
