@@ -299,6 +299,51 @@ class AccountControllerTest {
         threads * amountEach, accounts.findById(accountId).orElseThrow().getBalance());
   }
 
+  @Test
+  void 계좌_목록_조회() throws Exception {
+    MemberSession session = signupAndLogin("acc" + System.nanoTime(), "pw12345!", "목록1");
+    Long first = openAccount(session.token(), UUID.randomUUID().toString());
+    Long second = openAccount(session.token(), UUID.randomUUID().toString());
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.get("/api/v1/accounts")
+                .header("Authorization", "Bearer " + session.token()))
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.accounts.length()").value(2))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.accounts[0].accountId").value(first))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.accounts[0].primary").value(true))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.accounts[1].accountId").value(second))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.accounts[1].primary").value(false));
+  }
+
+  @Test
+  void 계좌가_없으면_빈_배열() throws Exception {
+    MemberSession session = signupAndLogin("acc" + System.nanoTime(), "pw12345!", "목록2");
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.get("/api/v1/accounts")
+                .header("Authorization", "Bearer " + session.token()))
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.accounts.length()").value(0));
+  }
+
+  @Test
+  void 다른_회원_계좌는_목록에_안_섞임() throws Exception {
+    MemberSession owner = signupAndLogin("acc" + System.nanoTime(), "pw12345!", "목록3A");
+    openAccount(owner.token(), UUID.randomUUID().toString());
+
+    MemberSession stranger = signupAndLogin("acc" + System.nanoTime(), "pw12345!", "목록3B");
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.get("/api/v1/accounts")
+                .header("Authorization", "Bearer " + stranger.token()))
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.accounts.length()").value(0));
+  }
+
   private Long openAccount(String token, String idempotencyKey) throws Exception {
     String body =
         mockMvc
