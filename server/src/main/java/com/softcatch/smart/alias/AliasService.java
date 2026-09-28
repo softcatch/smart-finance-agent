@@ -7,6 +7,7 @@ import com.softcatch.smart.auth.MemberRepository;
 import com.softcatch.smart.common.ApiException;
 import com.softcatch.smart.common.ErrorCode;
 import java.util.List;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,7 +27,13 @@ class AliasService {
   @Transactional
   AliasResponse register(Long memberId, String alias, String accountNumber) {
     String ownerName = resolveOwnerName(accountNumber);
-    Alias saved = aliases.save(new Alias(memberId, alias, accountNumber));
+    Alias saved;
+    try {
+      saved = aliases.save(new Alias(memberId, alias, accountNumber));
+    } catch (DataIntegrityViolationException e) {
+      // (member_id, alias) UNIQUE 제약 위반 — 같은 이름으로 이미 등록된 별칭이 있다.
+      throw new ApiException(ErrorCode.DUPLICATE_ALIAS);
+    }
     return new AliasResponse(saved.getId(), saved.getAlias(), saved.getAccountNumber(), ownerName);
   }
 

@@ -12,7 +12,8 @@ public enum ErrorCode {
   TRANSFER_REQUEST_NOT_FOUND(HttpStatus.NOT_FOUND, "송금 요청을 찾을 수 없습니다"),
   TRANSFER_REQUEST_EXPIRED(HttpStatus.GONE, "송금 요청이 만료되었습니다"),
   TRANSFER_REQUEST_ALREADY_USED(HttpStatus.CONFLICT, "이미 확정된 송금 요청입니다"),
-  INSUFFICIENT_BALANCE(HttpStatus.CONFLICT, "잔액이 부족합니다");
+  INSUFFICIENT_BALANCE(HttpStatus.CONFLICT, "잔액이 부족합니다"),
+  DUPLICATE_ALIAS(HttpStatus.CONFLICT, "이미 등록된 별칭입니다");
 
   final HttpStatus status;
   final String message;

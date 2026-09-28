@@ -61,6 +61,24 @@ class AliasControllerTest {
   }
 
   @Test
+  void 같은_별칭_두번_등록하면_409() throws Exception {
+    MemberSession owner = signupAndLogin("ali" + System.nanoTime(), "pw12345!", "계좌주인2");
+    String accountNumber = openAccount(owner.token());
+
+    MemberSession session = signupAndLogin("ali" + System.nanoTime(), "pw12345!", "중복등록자");
+    registerAlias(session.token(), "친구", accountNumber);
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.post("/api/v1/aliases")
+                .header("Authorization", "Bearer " + session.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new AliasRequest("친구", accountNumber))))
+        .andExpect(MockMvcResultMatchers.status().isConflict())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("DUPLICATE_ALIAS"));
+  }
+
+  @Test
   void 별칭_목록_조회() throws Exception {
     String motherName = "엄마이름";
     MemberSession motherAccount = signupAndLogin("ali" + System.nanoTime(), "pw12345!", motherName);
