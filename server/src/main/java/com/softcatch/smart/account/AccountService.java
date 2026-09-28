@@ -58,6 +58,10 @@ class AccountService {
 
   @Transactional
   Account charge(Long memberId, Long accountId, Long amount) {
+    if (amount == null || amount <= 0) {
+      throw new ApiException(ErrorCode.INVALID_AMOUNT);
+    }
+
     Account account =
         accounts
             .findById(accountId)

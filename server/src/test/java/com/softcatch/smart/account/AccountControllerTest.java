@@ -217,6 +217,32 @@ class AccountControllerTest {
   }
 
   @Test
+  void 충전_금액이_0이하면_잔액_변경없이_400() throws Exception {
+    MemberSession session = signupAndLogin("acc" + System.nanoTime(), "pw12345!", "충전음수");
+    Long accountId = openAccount(session.token(), UUID.randomUUID().toString());
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.post("/api/v1/accounts/{id}/charge", accountId)
+                .header("Authorization", "Bearer " + session.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new ChargeRequest(-1000L))))
+        .andExpect(MockMvcResultMatchers.status().isBadRequest())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("INVALID_AMOUNT"));
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.post("/api/v1/accounts/{id}/charge", accountId)
+                .header("Authorization", "Bearer " + session.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new ChargeRequest(0L))))
+        .andExpect(MockMvcResultMatchers.status().isBadRequest())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("INVALID_AMOUNT"));
+
+    Assertions.assertEquals(0L, accounts.findById(accountId).orElseThrow().getBalance());
+  }
+
+  @Test
   void 충전_소유자_아니면_403() throws Exception {
     MemberSession owner = signupAndLogin("acc" + System.nanoTime(), "pw12345!", "충전2A");
     Long accountId = openAccount(owner.token(), UUID.randomUUID().toString());
