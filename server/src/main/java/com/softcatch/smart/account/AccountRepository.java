@@ -16,6 +16,8 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
 
   List<Account> findByMemberIdOrderByIdAsc(Long memberId);
 
+  Optional<Account> findByAccountNumber(String accountNumber);
+
   // UPDATE 자체가 원자적이라 동시 충전도 잠금 없이 안전하다.
   // clearAutomatically=true — 벌크 UPDATE 후 1차 캐시를 비워, 뒤이은 조회가 옛 값을 반환하지 않게 한다.
   @Modifying(clearAutomatically = true)
