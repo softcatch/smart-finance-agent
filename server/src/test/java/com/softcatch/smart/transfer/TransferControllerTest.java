@@ -26,8 +26,10 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 @Import(TestcontainersConfiguration.class)
@@ -446,6 +448,105 @@ class TransferControllerTest {
     Account finalB = accounts.findByAccountNumber(accountB.accountNumber()).orElseThrow();
     Assertions.assertEquals(9000L, finalA.getBalance()); // 10000 - 3000 + 2000
     Assertions.assertEquals(11000L, finalB.getBalance()); // 10000 - 2000 + 3000
+  }
+
+  @Test
+  void 목록_조회_방향과_상대방_확인() throws Exception {
+    MemberSession memberA = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "목록A");
+    AccountInfo accountA = openAccount(memberA.token());
+    charge(memberA.token(), accountA.accountId(), 10000L);
+
+    MemberSession memberB = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "목록B");
+    AccountInfo accountB = openAccount(memberB.token());
+
+    String requestId =
+        createTransferRequest(memberA.token(), accountB.accountNumber(), null, 3000L);
+    confirmTransfer(memberA.token(), requestId);
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.get("/api/v1/transfers")
+                .header("Authorization", "Bearer " + memberA.token()))
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items.length()").value(1))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[0].direction").value("SENT"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[0].counterpartName").value("목록B"))
+        .andExpect(
+            MockMvcResultMatchers.jsonPath("$.data.items[0].counterpartAccountNumber")
+                .value(accountB.accountNumber()))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[0].amount").value(3000))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[0].createdAt").isNotEmpty())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.hasNext").value(false));
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.get("/api/v1/transfers")
+                .header("Authorization", "Bearer " + memberB.token()))
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[0].direction").value("RECEIVED"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[0].counterpartName").value("목록A"))
+        .andExpect(
+            MockMvcResultMatchers.jsonPath("$.data.items[0].counterpartAccountNumber")
+                .value(accountA.accountNumber()));
+  }
+
+  @Test
+  void 목록_조회_내역_없으면_빈배열() throws Exception {
+    MemberSession member = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "빈내역");
+    openAccount(member.token());
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.get("/api/v1/transfers")
+                .header("Authorization", "Bearer " + member.token()))
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items.length()").value(0))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.hasNext").value(false));
+  }
+
+  @Test
+  void 목록_조회_커서로_다음_페이지() throws Exception {
+    MemberSession sender = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "커서발신자");
+    AccountInfo senderAccount = openAccount(sender.token());
+    charge(sender.token(), senderAccount.accountId(), 10000L);
+
+    MemberSession recipient = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "커서수취인");
+    AccountInfo recipientAccount = openAccount(recipient.token());
+
+    for (int i = 0; i < 3; i++) {
+      String requestId =
+          createTransferRequest(sender.token(), recipientAccount.accountNumber(), null, 1000L);
+      confirmTransfer(sender.token(), requestId);
+    }
+
+    JsonNode firstPage = listHistory(sender.token(), null, 2);
+    Assertions.assertEquals(2, firstPage.at("/items").size());
+    Assertions.assertTrue(firstPage.at("/hasNext").asBoolean());
+    Long nextCursor = firstPage.at("/nextCursor").asLong();
+
+    JsonNode secondPage = listHistory(sender.token(), nextCursor, 2);
+    Assertions.assertEquals(1, secondPage.at("/items").size());
+    Assertions.assertFalse(secondPage.at("/hasNext").asBoolean());
+    Assertions.assertTrue(secondPage.at("/nextCursor").isNull());
+  }
+
+  private JsonNode listHistory(String token, Long cursor, Integer size) throws Exception {
+    MockHttpServletRequestBuilder request =
+        MockMvcRequestBuilders.get("/api/v1/transfers").header("Authorization", "Bearer " + token);
+    if (cursor != null) {
+      request = request.param("cursor", cursor.toString());
+    }
+    if (size != null) {
+      request = request.param("size", size.toString());
+    }
+    String body =
+        mockMvc
+            .perform(request)
+            .andExpect(MockMvcResultMatchers.status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    return json.readTree(body).at("/data");
   }
 
   private AccountInfo openAccount(String token) throws Exception {
