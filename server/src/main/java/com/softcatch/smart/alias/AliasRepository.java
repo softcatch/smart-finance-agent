@@ -2,6 +2,7 @@ package com.softcatch.smart.alias;
 
 import com.softcatch.smart.alias.dto.response.AliasResponse;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 
@@ -16,4 +17,6 @@ public interface AliasRepository extends JpaRepository<Alias, Long> {
           + "AND m.id = acc.memberId "
           + "ORDER BY a.id ASC")
   List<AliasResponse> findResponsesByMemberId(Long memberId);
+
+  Optional<Alias> findByMemberIdAndAlias(Long memberId, String alias);
 }
