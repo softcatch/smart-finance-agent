@@ -163,9 +163,17 @@ class TransferService {
   TransferHistoryListResponse list(Long memberId, Long cursor, Integer size) {
     int pageSize = size != null ? size : DEFAULT_PAGE_SIZE;
 
+    List<String> myAccountNumbers =
+        accounts.findByMemberIdOrderByIdAsc(memberId).stream()
+            .map(Account::getAccountNumber)
+            .toList();
+    if (myAccountNumbers.isEmpty()) {
+      return new TransferHistoryListResponse(List.of(), null, false);
+    }
+
     // size보다 하나 더 가져와서, 남는 게 있으면 hasNext=true로 판단한다.
     List<TransferHistoryItem> rows =
-        transfers.findHistory(memberId, cursor, Pageable.ofSize(pageSize + 1));
+        transfers.findHistory(myAccountNumbers, cursor, Pageable.ofSize(pageSize + 1));
 
     boolean hasNext = rows.size() > pageSize;
     List<TransferHistoryItem> items = hasNext ? rows.subList(0, pageSize) : rows;

@@ -8,22 +8,24 @@ import org.springframework.data.jpa.repository.Query;
 
 public interface TransferRepository extends JpaRepository<Transfer, Long> {
 
-  // 송금마다 계좌·회원을 따로 조회하면 N+1이 나서, 조인 하나로 방향(SENT/RECEIVED)과
-  // 상대방 정보까지 한 번에 계산한다. 커서(t.id < :cursor)로 최신순 페이지네이션한다.
+  // 내 계좌 조건을 Account 조인이 아니라 transfer 자신의 컬럼(from/to_account_number)에
+  // 직접 걸어서 V7의 인덱스를 타게 한다 — Account 조인으로 걸면 그 조건이 인덱스를 못 타서
+  // 내역이 적은 사용자도 transfer 테이블 전체를 id 역순으로 훑어야 했다(Codex 리뷰 지적).
+  // 상대방 이름은 이제 상대 계좌 하나만 조인해서 구한다(N+1 방지는 그대로 유지).
   @Query(
       "SELECT new com.softcatch.smart.transfer.dto.response.TransferHistoryItem("
           + "t.id, "
-          + "CASE WHEN fromAcc.memberId = :memberId THEN 'SENT' ELSE 'RECEIVED' END, "
-          + "CASE WHEN fromAcc.memberId = :memberId THEN toMember.name ELSE fromMember.name END, "
-          + "CASE WHEN fromAcc.memberId = :memberId THEN t.toAccountNumber ELSE t.fromAccountNumber END, "
+          + "CASE WHEN t.fromAccountNumber IN :myAccountNumbers THEN 'SENT' ELSE 'RECEIVED' END, "
+          + "counterpartMember.name, "
+          + "CASE WHEN t.fromAccountNumber IN :myAccountNumbers THEN t.toAccountNumber ELSE t.fromAccountNumber END, "
           + "t.amount, t.createdAt) "
-          + "FROM Transfer t, Account fromAcc, Account toAcc, Member fromMember, Member toMember "
-          + "WHERE fromAcc.accountNumber = t.fromAccountNumber "
-          + "AND toAcc.accountNumber = t.toAccountNumber "
-          + "AND fromMember.id = fromAcc.memberId "
-          + "AND toMember.id = toAcc.memberId "
-          + "AND (fromAcc.memberId = :memberId OR toAcc.memberId = :memberId) "
+          + "FROM Transfer t, Account counterpartAccount, Member counterpartMember "
+          + "WHERE counterpartAccount.accountNumber = "
+          + "  CASE WHEN t.fromAccountNumber IN :myAccountNumbers THEN t.toAccountNumber ELSE t.fromAccountNumber END "
+          + "AND counterpartMember.id = counterpartAccount.memberId "
+          + "AND (t.fromAccountNumber IN :myAccountNumbers OR t.toAccountNumber IN :myAccountNumbers) "
           + "AND (:cursor IS NULL OR t.id < :cursor) "
           + "ORDER BY t.id DESC")
-  List<TransferHistoryItem> findHistory(Long memberId, Long cursor, Pageable pageable);
+  List<TransferHistoryItem> findHistory(
+      List<String> myAccountNumbers, Long cursor, Pageable pageable);
 }
