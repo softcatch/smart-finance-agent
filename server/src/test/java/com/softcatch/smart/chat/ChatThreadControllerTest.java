@@ -25,18 +25,27 @@ class ChatThreadControllerTest {
   private record MemberSession(Long memberId, String token) {}
 
   @Autowired private MockMvc mockMvc;
+  @Autowired private ChatThreadRepository chatThreads;
   private final ObjectMapper json = new ObjectMapper();
 
   @Test
   void 새_대화_생성_성공() throws Exception {
     MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "채팅1");
 
-    mockMvc
-        .perform(
-            MockMvcRequestBuilders.post("/api/v1/chat/threads")
-                .header("Authorization", "Bearer " + session.token()))
-        .andExpect(MockMvcResultMatchers.status().isCreated())
-        .andExpect(MockMvcResultMatchers.jsonPath("$.data.threadId").value(startsWith("th_")));
+    String body =
+        mockMvc
+            .perform(
+                MockMvcRequestBuilders.post("/api/v1/chat/threads")
+                    .header("Authorization", "Bearer " + session.token()))
+            .andExpect(MockMvcResultMatchers.status().isCreated())
+            .andExpect(MockMvcResultMatchers.jsonPath("$.data.threadId").value(startsWith("th_")))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    String threadId = json.readTree(body).at("/data/threadId").asText();
+
+    ChatThread saved = chatThreads.findByThreadId(threadId).orElseThrow();
+    Assertions.assertEquals(session.memberId(), saved.getMemberId());
   }
 
   @Test
