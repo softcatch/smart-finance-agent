@@ -1,7 +1,7 @@
 import re
 
 # 안전 판정은 LLM이 아니라 파이썬 규칙으로 한다.
-_CARD = re.compile(r"(?<!\d)\d{4}-?\d{4}-?\d{4}-?\d{4}(?!\d)")
+_CARD = re.compile(r"(?<!\d)\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}(?!\d)")
 _RRN = re.compile(r"(?<!\d)\d{6}-?[1-4]\d{6}(?!\d)")
 _INJECTION = re.compile(
     r"이전\s*(지시|명령|지침)\S*\s*(을|를)?\s*(모두\s*)?(무시|잊)"
