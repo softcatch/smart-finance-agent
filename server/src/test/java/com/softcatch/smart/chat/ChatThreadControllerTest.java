@@ -167,6 +167,21 @@ class ChatThreadControllerTest {
         .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("AI_SERVER_UNAVAILABLE"));
   }
 
+  @Test
+  void 분당_10회를_넘으면_429_RATE_LIMITED() throws Exception {
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "채팅7");
+    String threadId = createThread(session.token());
+
+    for (int i = 0; i < ChatRateLimiter.LIMIT; i++) {
+      sendMessage(session.token(), threadId).andExpect(MockMvcResultMatchers.status().isOk());
+    }
+    sendMessage(session.token(), threadId)
+        .andExpect(MockMvcResultMatchers.status().isTooManyRequests())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("RATE_LIMITED"));
+
+    Assertions.assertEquals(ChatRateLimiter.LIMIT, FAKE_AI.calls); // 제한 초과분은 FastAPI로 안 간다
+  }
+
   private ResultActions sendMessage(String token, String threadId) throws Exception {
     return mockMvc.perform(
         MockMvcRequestBuilders.post("/api/v1/chat/threads/" + threadId + "/messages")

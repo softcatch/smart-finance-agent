@@ -10,10 +10,13 @@ import org.springframework.stereotype.Service;
 class ChatMessageService {
 
   private final ChatThreadRepository chatThreads;
+  private final ChatRateLimiter rateLimiter;
   private final AiClient aiClient;
 
-  ChatMessageService(ChatThreadRepository chatThreads, AiClient aiClient) {
+  ChatMessageService(
+      ChatThreadRepository chatThreads, ChatRateLimiter rateLimiter, AiClient aiClient) {
     this.chatThreads = chatThreads;
+    this.rateLimiter = rateLimiter;
     this.aiClient = aiClient;
   }
 
@@ -23,6 +26,7 @@ class ChatMessageService {
         .findByThreadId(threadId)
         .filter(thread -> thread.getMemberId().equals(memberId))
         .orElseThrow(() -> new ApiException(ErrorCode.THREAD_NOT_FOUND));
+    rateLimiter.check(memberId);
     return aiClient.chat(token, threadId, message);
   }
 }
