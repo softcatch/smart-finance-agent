@@ -1,4 +1,12 @@
-from fastapi import FastAPI
+import os
+from functools import lru_cache
+from typing import Annotated, Any
+
+from fastapi import Depends, FastAPI
+from langchain_openai import ChatOpenAI
+from pydantic import BaseModel
+
+from app.graph import build_graph
 
 app = FastAPI(title="smart-ai")
 
@@ -7,3 +15,24 @@ app = FastAPI(title="smart-ai")
 @app.get("/internal/health")
 def health() -> dict[str, str]:
     return {"status": "UP"}
+
+
+# 처음 요청 때 만든다 — import 시점에 만들면 OPENAI_API_KEY 없는 CI·헬스 테스트가 깨진다.
+@lru_cache
+def get_graph():
+    return build_graph(ChatOpenAI(model=os.getenv("OPENAI_MODEL") or "gpt-5-nano"))
+
+
+class ChatRequest(BaseModel):
+    threadId: str  # 이번엔 전달만 받는다(대화 맥락은 FR-015)
+    message: str
+
+
+@app.post("/internal/chat")
+def chat(req: ChatRequest, graph: Annotated[Any, Depends(get_graph)]) -> dict:
+    out = graph.invoke({"message": req.message})
+    return {
+        "success": True,
+        "data": {"reply": out["reply"], "guard": out["guard"]},
+        "error": None,
+    }
