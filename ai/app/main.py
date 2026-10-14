@@ -20,7 +20,9 @@ def health() -> dict[str, str]:
 # 처음 요청 때 만든다 — import 시점에 만들면 OPENAI_API_KEY 없는 CI·헬스 테스트가 깨진다.
 @lru_cache
 def get_graph():
-    return build_graph(ChatOpenAI(model=os.getenv("OPENAI_MODEL") or "gpt-5-nano"))
+    # OpenAI 429는 재시도하지 않는다(SDK 기본 2회 재시도를 끈다).
+    llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL") or "gpt-5-nano", max_retries=0)
+    return build_graph(llm)
 
 
 class ChatRequest(BaseModel):
