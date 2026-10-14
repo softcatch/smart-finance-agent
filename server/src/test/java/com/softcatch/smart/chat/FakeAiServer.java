@@ -39,6 +39,14 @@ class FakeAiServer implements AutoCloseable {
     server.start();
   }
 
+  void reset() {
+    status = 200;
+    delayMillis = 0;
+    calls = 0;
+    lastAuthorization = null;
+    lastBody = null;
+  }
+
   String baseUrl() {
     return "http://127.0.0.1:" + server.getAddress().getPort();
   }
