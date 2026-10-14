@@ -48,6 +48,17 @@ class AiClientTest {
   }
 
   @Test
+  void 타임아웃_뒤에_지연_핸들러가_남아도_다음_요청은_막히지_않는다() {
+    fake.delayMillis = 3000;
+    Assertions.assertThrows(ApiException.class, () -> client.chat("t", "th_1", "안녕"));
+
+    fake.delayMillis = 0; // 앞 핸들러는 아직 잠들어 있다
+    ChatMessageResponse res = client.chat("t", "th_1", "안녕");
+
+    Assertions.assertEquals("PASS", res.guard());
+  }
+
+  @Test
   void 서버가_내려가_있으면_AI_SERVER_UNAVAILABLE() {
     fake.close();
 

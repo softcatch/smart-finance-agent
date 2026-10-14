@@ -123,7 +123,7 @@ class ChatThreadControllerTest {
         .andExpect(MockMvcResultMatchers.status().isNotFound())
         .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("THREAD_NOT_FOUND"));
 
-    Assertions.assertEquals(0, FAKE_AI.calls);
+    Assertions.assertEquals(0, FAKE_AI.calls.get());
   }
 
   @Test
@@ -179,7 +179,7 @@ class ChatThreadControllerTest {
         .andExpect(MockMvcResultMatchers.status().isTooManyRequests())
         .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("RATE_LIMITED"));
 
-    Assertions.assertEquals(ChatRateLimiter.LIMIT, FAKE_AI.calls); // 제한 초과분은 FastAPI로 안 간다
+    Assertions.assertEquals(ChatRateLimiter.LIMIT, FAKE_AI.calls.get()); // 제한 초과분은 FastAPI로 안 간다
   }
 
   private ResultActions sendMessage(String token, String threadId) throws Exception {
