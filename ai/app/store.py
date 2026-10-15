@@ -1,4 +1,5 @@
 import psycopg
+import psycopg.rows
 
 # 이 테이블은 FastAPI만 읽고 쓴다(재무 수치는 파이썬 계산 코드 — 개요 3절). Flyway와 엮지 않고 여기서 만든다.
 SCHEMA = """
@@ -65,3 +66,49 @@ def upsert_financials(conn: psycopg.Connection, rows: list[dict]) -> int:
         )
     conn.commit()
     return len(rows)
+
+
+def _normalize(name: str) -> str:
+    return name.replace(" ", "").upper()
+
+
+# 사용자가 말한 이름을 company에서 찾는다. 공백·대소문자를 무시한 정식 이름이나 종목코드가 일치해야 한다
+# (별칭·오타는 인식률이 문제로 확인되면 — NFR-044). (찾은 [(종목코드, 이름)] 말한 순서·중복 제거, 못 찾은 이름들).
+def find_companies(
+    conn: psycopg.Connection, names: list[str]
+) -> tuple[list[tuple[str, str]], list[str]]:
+    wanted = [_normalize(n) for n in names]
+    rows = conn.execute(
+        "SELECT stock_code, name FROM company "
+        "WHERE upper(replace(name, ' ', '')) = ANY(%s) OR stock_code = ANY(%s)",
+        (wanted, wanted),
+    ).fetchall()
+    by_key = {}
+    for stock_code, name in rows:
+        by_key[_normalize(name)] = (stock_code, name)
+        by_key[stock_code] = (stock_code, name)
+
+    found: list[tuple[str, str]] = []
+    missing: list[str] = []
+    for original, key in zip(names, wanted, strict=True):
+        company = by_key.get(key)
+        if company is None:
+            missing.append(original)
+        elif company not in found:
+            found.append(company)
+    return found, missing
+
+
+# 회사별 재무 행(분석에 필요한 열만). 행이 없는 회사도 빈 목록으로 돌려준다.
+def load_financials(conn: psycopg.Connection, stock_codes: list[str]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {code: [] for code in stock_codes}
+    with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+        cur.execute(
+            "SELECT stock_code, bsns_year, reprt_code, fs_div, account_nm, amount, add_amount, "
+            "prev_amount FROM financial WHERE stock_code = ANY(%s) "
+            "ORDER BY stock_code, bsns_year, reprt_code, fs_div, account_nm",
+            (stock_codes,),
+        )
+        for row in cur:
+            grouped[row["stock_code"]].append(row)
+    return grouped
