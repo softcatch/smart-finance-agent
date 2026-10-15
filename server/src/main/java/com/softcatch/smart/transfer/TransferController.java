@@ -1,6 +1,7 @@
 package com.softcatch.smart.transfer;
 
 import com.softcatch.smart.common.ApiResponse;
+import com.softcatch.smart.transfer.dto.request.TransferConfirmRequest;
 import com.softcatch.smart.transfer.dto.request.TransferCreateRequest;
 import com.softcatch.smart.transfer.dto.response.TransferConfirmResponse;
 import com.softcatch.smart.transfer.dto.response.TransferCreateResponse;
@@ -35,8 +36,11 @@ class TransferController {
 
   @PostMapping("/api/v1/transfer-requests/{requestId}/confirm")
   ApiResponse<TransferConfirmResponse> confirm(
-      @AuthenticationPrincipal Jwt jwt, @PathVariable String requestId) {
-    return ApiResponse.ok(transferService.confirm(Long.valueOf(jwt.getSubject()), requestId));
+      @AuthenticationPrincipal Jwt jwt,
+      @PathVariable String requestId,
+      @RequestBody TransferConfirmRequest request) {
+    return ApiResponse.ok(
+        transferService.confirm(Long.valueOf(jwt.getSubject()), requestId, request.password()));
   }
 
   @GetMapping("/api/v1/transfers")
