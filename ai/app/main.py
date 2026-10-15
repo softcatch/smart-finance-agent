@@ -2,6 +2,7 @@ import os
 from functools import lru_cache, partial
 from time import perf_counter
 from typing import Annotated, Any
+from uuid import uuid4
 
 import psycopg
 from fastapi import BackgroundTasks, Depends, FastAPI, Header
@@ -12,7 +13,13 @@ from app.business import embed_texts
 from app.graph import build_graph
 from app.guard import mask_pii
 from app.spring import create_transfer_request, get_transfer_history
-from app.store import find_companies, load_financials, search_business_chunks, write_chat_log
+from app.store import (
+    find_companies,
+    load_financials,
+    save_detail,
+    search_business_chunks,
+    write_chat_log,
+)
 
 app = FastAPI(title="smart-ai")
 
@@ -80,6 +87,17 @@ def log_chat(thread_id: str, guard: str, node_ms: dict[str, int]) -> None:
         pass
 
 
+# 상세 보기 ID(FR-016)를 발급하고 분석 조건을 저장한다. 저장에 실패하면 ID 없이 답한다(채팅은 이어진다).
+def issue_detail(detail: dict) -> str | None:
+    detail_id = f"dt_{uuid4().hex}"
+    try:
+        with _connect() as conn:
+            save_detail(conn, detail_id, detail["kind"], detail["stocks"])
+    except psycopg.Error:
+        return None
+    return detail_id
+
+
 class ChatRequest(BaseModel):
     threadId: str  # 체크포인터의 thread_id — 같은 값이면 같은 대화(FR-015)
     message: str
@@ -123,4 +141,6 @@ def chat(
         data["transferCard"] = out["transfer_card"]
     if out.get("table"):  # 재무 비교 표도 있을 때만(E-11)
         data["table"] = out["table"]
+    if out.get("detail") and (detail_id := issue_detail(out["detail"])):  # 분석 답변일 때만(E-11)
+        data["detailId"] = detail_id
     return {"success": True, "data": data, "error": None}

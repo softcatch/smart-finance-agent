@@ -46,6 +46,7 @@ NOT_FOUND_REPLY = "계좌나 별칭을 찾을 수 없습니다. 받는 분의 �
 # is_history·period: 이번 턴이 내역 조회인지와 조회 기간(오늘·이번 달·지난달·최근 7일).
 # is_financial·companies: 이번 턴이 재무 비교인지와 말한 기업 이름. table: 이번 턴의 재무 비교 표(턴마다 비운다).
 # is_business: 이번 턴이 사업의 내용 질문인지(기업 이름은 companies를 함께 쓴다).
+# detail: 이번 답변의 상세 보기 조건({kind, stocks}). 재무 비교 표가 나갈 때만 채우고, 턴마다 비운다.
 # footer: 답변 끝에 붙이는 줄(출처 등 코드가 만든 것). unverified: 답변 숫자 중 근거에 없는 것. 둘 다 턴마다 비운다.
 # 근거 텍스트(공시 블록)는 상태에 두지 않는다 — 체크포인터에 쌓이지 않게 노드 안에서 대조한다.
 class ChatState(MessagesState, total=False):
@@ -61,6 +62,7 @@ class ChatState(MessagesState, total=False):
     pending: dict
     transfer_card: dict | None
     table: dict | None
+    detail: dict | None
     footer: str
     unverified: list[str]
 
@@ -82,6 +84,7 @@ def build_graph(llm: BaseChatModel, extractor=None):
                 "guard": "INJECTION",
                 "transfer_card": None,
                 "table": None,
+                "detail": None,
                 "footer": "",
                 "unverified": [],
             }
@@ -90,6 +93,7 @@ def build_graph(llm: BaseChatModel, extractor=None):
             "guard": "PASS",
             "transfer_card": None,
             "table": None,
+            "detail": None,
             "footer": "",
             "unverified": [],
         }
@@ -180,7 +184,10 @@ def build_graph(llm: BaseChatModel, extractor=None):
             reply = f"{', '.join(name for _, name in companies)}의 재무 데이터가 아직 수집되지 않았습니다."
         else:
             reply = f"수집 대상에서 찾지 못한 기업입니다: {', '.join(missing)}. 정식 기업명으로 다시 말씀해 주세요."
-        return {"messages": [AIMessage(reply)], "reply": reply, "table": table}
+        detail = (
+            {"kind": "financial", "stocks": [stock for stock, _ in companies]} if table else None
+        )
+        return {"messages": [AIMessage(reply)], "reply": reply, "table": table, "detail": detail}
 
     # 사업의 내용 답변: 기업을 찾고 그 회사 청크를 검색해(검색 함수) 공시 본문만 근거로 요약한다.
     # 본문은 이번 호출의 시스템 프롬프트로만 넘기고 messages에는 남기지 않는다(기록이 불어나지 않게).

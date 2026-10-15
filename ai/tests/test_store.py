@@ -5,8 +5,10 @@ from app.store import (
     business_rcept_no,
     ensure_schema,
     find_companies,
+    load_detail,
     load_financials,
     replace_business_chunks,
+    save_detail,
     search_business_chunks,
     upsert_companies,
     upsert_financials,
@@ -298,3 +300,23 @@ def test_로그_테이블이_아직_없어도_만들어서_남긴다(conn):
     write_chat_log(conn, "th_1", "ADVICE", {"answer": 10})
 
     assert conn.execute("SELECT guard FROM chat_log").fetchall() == [("ADVICE",)]
+
+
+def test_상세_보기_조건을_저장하고_읽는다(conn):
+    save_detail(conn, "dt_1", "financial", ["005930", "000660"])
+
+    assert load_detail(conn, "dt_1") == {"kind": "financial", "stock_codes": ["005930", "000660"]}
+
+
+def test_없는_상세_보기는_None(conn):
+    assert load_detail(conn, "dt_없음") is None
+
+
+def test_상세_보기_테이블이_아직_없어도_만들어서_저장하고_읽기는_None(conn):
+    conn.execute("DROP TABLE detail_condition")
+    conn.commit()
+    assert load_detail(conn, "dt_1") is None  # 아직 없으니 하나도 없다
+
+    save_detail(conn, "dt_1", "financial", ["005930"])
+
+    assert load_detail(conn, "dt_1")["stock_codes"] == ["005930"]

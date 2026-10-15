@@ -49,6 +49,14 @@ CREATE TABLE IF NOT EXISTS chat_log (
     guard       VARCHAR(20)  NOT NULL,
     node_ms     JSONB        NOT NULL  -- 노드 이름 → 걸린 시간(ms)
 );
+
+-- 상세 보기(FR-016): 답변마다 발급한 detailId와 분석 조건. 보고서는 클릭할 때 이 조건으로 만든다.
+CREATE TABLE IF NOT EXISTS detail_condition (
+    detail_id    TEXT         PRIMARY KEY,
+    kind         VARCHAR(20)  NOT NULL,  -- 지금은 financial(재무 비교)뿐
+    stock_codes  TEXT[]       NOT NULL,
+    created_at   TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
 """
 
 
@@ -184,16 +192,46 @@ def search_business_chunks(
         return cur.fetchall()
 
 
-# 채팅 한 턴의 판정과 노드별 소요 시간을 남긴다. 수집기가 스키마를 만들기 전(DART 키 없음)이면 여기서 만든다.
-def write_chat_log(
-    conn: psycopg.Connection, thread_id: str, guard: str, node_ms: dict[str, int]
-) -> None:
-    sql = "INSERT INTO chat_log (thread_id, guard, node_ms) VALUES (%s, %s, %s)"
-    row = (thread_id, guard, Jsonb(node_ms))
+# 수집기가 스키마를 만들기 전(DART 키 없음)이면 여기서 만들고 다시 한 번 실행한다.
+def _execute_ensuring_schema(conn: psycopg.Connection, sql: str, params: tuple) -> None:
     try:
-        conn.execute(sql, row)
+        conn.execute(sql, params)
     except psycopg.errors.UndefinedTable:
         conn.rollback()
         ensure_schema(conn)
-        conn.execute(sql, row)
+        conn.execute(sql, params)
     conn.commit()
+
+
+# 채팅 한 턴의 판정과 노드별 소요 시간을 남긴다.
+def write_chat_log(
+    conn: psycopg.Connection, thread_id: str, guard: str, node_ms: dict[str, int]
+) -> None:
+    _execute_ensuring_schema(
+        conn,
+        "INSERT INTO chat_log (thread_id, guard, node_ms) VALUES (%s, %s, %s)",
+        (thread_id, guard, Jsonb(node_ms)),
+    )
+
+
+# 답변마다 발급한 상세 보기 ID와 분석 조건(기업 종목코드)을 저장한다.
+def save_detail(
+    conn: psycopg.Connection, detail_id: str, kind: str, stock_codes: list[str]
+) -> None:
+    _execute_ensuring_schema(
+        conn,
+        "INSERT INTO detail_condition (detail_id, kind, stock_codes) VALUES (%s, %s, %s)",
+        (detail_id, kind, stock_codes),
+    )
+
+
+# 상세 보기 조건. 없으면 None(테이블을 만든 적 없는 환경도 같다).
+def load_detail(conn: psycopg.Connection, detail_id: str) -> dict | None:
+    try:
+        row = conn.execute(
+            "SELECT kind, stock_codes FROM detail_condition WHERE detail_id = %s", (detail_id,)
+        ).fetchone()
+    except psycopg.errors.UndefinedTable:
+        conn.rollback()
+        return None
+    return {"kind": row[0], "stock_codes": row[1]} if row else None
