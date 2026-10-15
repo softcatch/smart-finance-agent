@@ -14,9 +14,10 @@ class FakeAiServer implements AutoCloseable {
 
   private final HttpServer server;
   private final ExecutorService executor = Executors.newCachedThreadPool();
-  volatile int status = 200;
-  volatile String responseBody =
+  static final String DEFAULT_BODY =
       "{\"success\":true,\"data\":{\"reply\":\"안녕하세요\",\"guard\":\"PASS\"},\"error\":null}";
+  volatile int status = 200;
+  volatile String responseBody = DEFAULT_BODY;
   volatile long delayMillis = 0;
   volatile String lastAuthorization;
   volatile String lastBody;
@@ -47,6 +48,7 @@ class FakeAiServer implements AutoCloseable {
 
   void reset() {
     status = 200;
+    responseBody = DEFAULT_BODY;
     delayMillis = 0;
     calls.set(0);
     lastAuthorization = null;

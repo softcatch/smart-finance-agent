@@ -32,6 +32,7 @@ services:
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-nano}
+      SMART_SERVER_BASE_URL: http://server:8080
 
 volumes:
   db-data:

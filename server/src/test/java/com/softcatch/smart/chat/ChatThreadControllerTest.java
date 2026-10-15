@@ -114,6 +114,35 @@ class ChatThreadControllerTest {
   }
 
   @Test
+  void 확인_카드가_있으면_transferCard를_그대로_전달한다() throws Exception {
+    FAKE_AI.responseBody =
+        "{\"success\":true,\"data\":{\"reply\":\"김영희님께 10,000원을 보낼까요?\",\"guard\":\"PASS\",\"transferCard\":{\"requestId\":\"tr_7f3a\",\"recipientName\":\"김영희\",\"recipientAccountNumber\":\"123456789012\",\"fromAccountNumber\":\"987654321098\",\"amount\":10000,\"expiresAt\":\"2026-09-27T10:05:00+09:00\"}},\"error\":null}";
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "채팅카드");
+    String threadId = createThread(session.token());
+
+    sendMessage(session.token(), threadId)
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.transferCard.requestId").value("tr_7f3a"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.transferCard.recipientName").value("김영희"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.transferCard.amount").value(10000));
+  }
+
+  @Test
+  void 확인_카드가_없으면_transferCard_필드를_내리지_않는다() throws Exception {
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "채팅무카드");
+    String threadId = createThread(session.token());
+
+    String body =
+        sendMessage(session.token(), threadId)
+            .andExpect(MockMvcResultMatchers.status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    Assertions.assertFalse(body.contains("transferCard"), body);
+  }
+
+  @Test
   void 남의_스레드면_404_THREAD_NOT_FOUND이고_FastAPI를_부르지_않는다() throws Exception {
     MemberSession owner = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "주인");
     MemberSession other = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "타인");

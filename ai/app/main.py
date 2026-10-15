@@ -1,13 +1,14 @@
 import os
-from functools import lru_cache
+from functools import lru_cache, partial
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Header
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 from app.graph import build_graph
 from app.guard import mask_pii
+from app.spring import create_transfer_request
 
 app = FastAPI(title="smart-ai")
 
@@ -32,13 +33,24 @@ class ChatRequest(BaseModel):
 
 
 @app.post("/internal/chat")
-def chat(req: ChatRequest, graph: Annotated[Any, Depends(get_graph)]) -> dict:
+def chat(
+    req: ChatRequest,
+    graph: Annotated[Any, Depends(get_graph)],
+    authorization: Annotated[str | None, Header()] = None,
+) -> dict:
+    token = (authorization or "").removeprefix("Bearer ")
     # 그래프 입력도 체크포인터에 저장되므로, 원문이 남지 않게 넣기 전에 가린다.
+    # JWT는 문자열 값이 아니라 함수에 담아 넘긴다 — 문자열은 체크포인터 메타데이터에 저장된다.
     out = graph.invoke(
-        {"message": mask_pii(req.message)}, {"configurable": {"thread_id": req.threadId}}
+        {"message": mask_pii(req.message)},
+        {
+            "configurable": {
+                "thread_id": req.threadId,
+                "create_transfer": partial(create_transfer_request, token),
+            }
+        },
     )
-    return {
-        "success": True,
-        "data": {"reply": out["reply"], "guard": out["guard"]},
-        "error": None,
-    }
+    data = {"reply": out["reply"], "guard": out["guard"]}
+    if out.get("transfer_card"):  # 확인 카드는 있을 때만(E-11)
+        data["transferCard"] = out["transfer_card"]
+    return {"success": True, "data": data, "error": None}
