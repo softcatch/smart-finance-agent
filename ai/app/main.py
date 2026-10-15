@@ -23,9 +23,11 @@ def health() -> dict[str, str]:
 @lru_cache
 def get_graph():
     # OpenAI 429는 재시도하지 않는다(SDK 기본 2회 재시도를 끈다).
-    # gpt-5 계열은 추론 강도가 지연을 좌우한다 — 기본에서는 호출 하나가 8~10초, minimal이면 1초 안팎이다.
+    # gpt-5 계열은 추론 강도가 지연을 좌우한다. 같은 모델로 잰 값: 기본(medium)은 호출당 4~11초,
+    # low는 약 2.7초, minimal은 약 1.2초다. minimal은 빠르지만 의도 추출을 자주 놓친다(13건 중 3건 —
+    # 후속 발화를 송금으로 이어 받지 못하고, 범위 밖 기간을 최근 7일로 고른다). 그래서 low를 쓴다.
     # 추론을 쓰지 않는 모델은 이 인자를 거부하므로 OPENAI_REASONING_EFFORT를 비우면 뺀다.
-    effort = os.getenv("OPENAI_REASONING_EFFORT", "minimal")
+    effort = os.getenv("OPENAI_REASONING_EFFORT", "low")
     options = {"reasoning_effort": effort} if effort else {}
     llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL") or "gpt-5-nano", max_retries=0, **options)
     return build_graph(llm)

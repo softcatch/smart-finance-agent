@@ -26,21 +26,21 @@ def fake_openai(monkeypatch):
     main.get_graph.cache_clear()
 
 
-def test_추론_강도는_기본이_minimal(monkeypatch):
+def test_추론_강도는_기본이_low(monkeypatch):
     monkeypatch.delenv("OPENAI_REASONING_EFFORT", raising=False)
 
     main.get_graph()
 
-    assert FakeOpenAI.kwargs["reasoning_effort"] == "minimal"
+    assert FakeOpenAI.kwargs["reasoning_effort"] == "low"
     assert FakeOpenAI.kwargs["max_retries"] == 0  # 429 재시도 없음은 그대로
 
 
 def test_환경변수로_추론_강도를_바꾼다(monkeypatch):
-    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "low")
+    monkeypatch.setenv("OPENAI_REASONING_EFFORT", "minimal")
 
     main.get_graph()
 
-    assert FakeOpenAI.kwargs["reasoning_effort"] == "low"
+    assert FakeOpenAI.kwargs["reasoning_effort"] == "minimal"
 
 
 def test_빈_값이면_추론_강도를_보내지_않는다(monkeypatch):

@@ -36,7 +36,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-nano}
       # 비우면(OPENAI_REASONING_EFFORT=) 추론 강도 인자를 빼서 추론을 안 쓰는 모델도 쓸 수 있다
-      OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT-minimal}
+      OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT-low}
       SMART_SERVER_BASE_URL: http://server:8080
 
 volumes:
