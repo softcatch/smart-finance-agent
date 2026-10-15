@@ -423,6 +423,51 @@ class TransferControllerTest {
   }
 
   @Test
+  void 같은_요청ID로_맞는_비밀번호와_틀린_비밀번호가_동시에_와도_송금은_최대_1번() throws Exception {
+    MemberSession recipient = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "수취인11");
+    AccountInfo recipientAccount = openAccount(recipient.token());
+
+    MemberSession sender = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "발신자14");
+    AccountInfo senderAccount = openAccount(sender.token());
+    charge(sender.token(), senderAccount.accountId(), 50000L);
+    String requestId =
+        createTransferRequest(sender.token(), recipientAccount.accountNumber(), null, 10000L);
+
+    // 맞는 비밀번호 1개와 틀린 비밀번호 7개 — 틀린 쪽이 먼저 요청ID를 잡는 경우가 많게 한다.
+    int attempts = 8;
+    CyclicBarrier barrier = new CyclicBarrier(attempts);
+    ExecutorService pool = Executors.newFixedThreadPool(attempts);
+    List<Future<Integer>> futures = new ArrayList<>();
+    for (int i = 0; i < attempts; i++) {
+      String password = i == 0 ? ACCOUNT_PASSWORD : "0000";
+      futures.add(
+          pool.submit(
+              () -> {
+                barrier.await();
+                return confirm(sender.token(), requestId, password)
+                    .andReturn()
+                    .getResponse()
+                    .getStatus();
+              }));
+    }
+    List<Integer> statuses = new ArrayList<>();
+    for (Future<Integer> future : futures) {
+      statuses.add(future.get());
+    }
+    pool.shutdown();
+
+    // 요청ID를 먼저 잡은 한 요청만 비밀번호 확인까지 가고, 나머지는 전부 409(이미 사용)다.
+    Assertions.assertEquals(attempts - 1, statuses.stream().filter(s -> s == 409).count());
+    // 그 한 요청이 맞는 비밀번호였으면 송금 1번, 틀렸으면 송금 없음(폐기)이다.
+    long sentCount = statuses.stream().filter(s -> s == 200).count();
+    Account senderAcc = accounts.findByAccountNumber(senderAccount.accountNumber()).orElseThrow();
+    Assertions.assertEquals(50000L - 10000L * sentCount, senderAcc.getBalance());
+    // 어느 쪽이든 이후에는 맞는 비밀번호로도 다시 쓸 수 없다.
+    confirm(sender.token(), requestId, ACCOUNT_PASSWORD)
+        .andExpect(MockMvcResultMatchers.status().isConflict());
+  }
+
+  @Test
   void 동시_송금_후_잔액이_음수_안_됨() throws Exception {
     MemberSession recipient = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "수취인8");
     AccountInfo recipientAccount = openAccount(recipient.token());
