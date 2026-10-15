@@ -931,3 +931,80 @@ def test_엔드포인트는_교체된_답변과_판정_코드를_돌려준다():
         app.dependency_overrides.clear()
 
     assert res.json()["data"] == {"reply": OUTPUT_REPLIES["ADVICE"], "guard": "ADVICE"}
+
+
+def _chunks_with(content: str):
+    return _search(chunks={"005930": [_chunk(content=content)]})[0]
+
+
+def test_답변_숫자가_공시_본문에_있으면_통과한다():
+    llm, _ = _says("수주잔고는 1,000억원입니다.")
+    graph = build_graph(llm, _business("삼성전자"))
+
+    out = graph.invoke(
+        {"message": "삼성전자 수주잔고"},
+        _cfg("th_1", search_business=_chunks_with("수주잔고 1,000억원")),
+    )
+
+    assert out["guard"] == "PASS"
+    assert out["reply"].startswith("수주잔고는 1,000억원입니다.\n\n출처")
+
+
+def test_답변_숫자가_근거에_없으면_고정_문장과_출처만_나가고_기록에_안_남는다():
+    llm, seen = _says("수주잔고는 1,500억원입니다.", "네")
+    graph = build_graph(
+        llm,
+        _extractor(
+            TransferSlots(is_transfer=False, is_business=True, companies=["삼성전자"]),
+            TransferSlots(is_transfer=False),
+        ),
+    )
+
+    out = graph.invoke(
+        {"message": "삼성전자 수주잔고"},
+        _cfg("th_1", search_business=_chunks_with("수주잔고 1,000억원")),
+    )
+    graph.invoke({"message": "고마워"}, _cfg("th_1"))
+
+    assert out["guard"] == "NUMBER_UNVERIFIED"
+    assert out["reply"].startswith(OUTPUT_REPLIES["NUMBER_UNVERIFIED"] + "\n\n출처\n- 삼성전자")
+    assert all("1,500" not in m for m in seen[1])  # 믿을 수 없는 숫자가 다음 턴에 가지 않는다
+
+
+def test_질문에_나온_숫자는_근거로_본다():
+    llm, _ = _says("2026년 기준 수주잔고는 1,000억원입니다.")
+    graph = build_graph(llm, _business("삼성전자"))
+
+    out = graph.invoke(
+        {"message": "삼성전자 2026년 수주잔고"},
+        _cfg("th_1", search_business=_chunks_with("수주잔고 1,000억원")),
+    )
+
+    assert out["guard"] == "PASS"
+
+
+def test_일반_답변은_숫자를_대조하지_않는다():
+    graph = build_graph(_says("보통 3일쯤 걸립니다.")[0], _plain())
+
+    out = graph.invoke({"message": "송금 얼마나 걸려?"}, _cfg("th_1"))
+
+    assert out["guard"] == "PASS"
+    assert out["reply"] == "보통 3일쯤 걸립니다."
+
+
+def test_숫자_판정은_턴마다_새로_한다():
+    llm, _ = _says("수주잔고는 1,500억원입니다.", "수주잔고는 1,000억원입니다.")
+    graph = build_graph(
+        llm,
+        _extractor(
+            TransferSlots(is_transfer=False, is_business=True, companies=["삼성전자"]),
+            TransferSlots(is_transfer=False, is_business=True, companies=["삼성전자"]),
+        ),
+    )
+    search = _chunks_with("수주잔고 1,000억원")
+
+    first = graph.invoke({"message": "삼성전자 수주잔고"}, _cfg("th_1", search_business=search))
+    second = graph.invoke({"message": "다시 알려줘"}, _cfg("th_1", search_business=search))
+
+    assert first["guard"] == "NUMBER_UNVERIFIED"
+    assert second["guard"] == "PASS"  # 지난 턴의 미확인 목록이 남지 않는다

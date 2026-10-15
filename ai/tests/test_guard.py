@@ -127,3 +127,12 @@ def test_다른_항목의_숫자여도_근거에_있으면_통과한다_3단계�
     reply = "영업이익은 79,140,503입니다"  # 79,140,503은 매출액 값이다
 
     assert unverified_numbers(reply, "매출액 79,140,503 영업이익 6,685,272") == []
+
+
+def test_근거에_없는_숫자가_있으면_숫자_미확인():
+    assert check_output("수주잔고는 1,500억원입니다", ["1500"]) == "NUMBER_UNVERIFIED"
+    assert check_output("수주잔고는 1,500억원입니다", []) == "PASS"
+
+
+def test_투자_권유가_숫자_미확인보다_먼저():
+    assert check_output("목표주가는 10만원입니다", ["10"]) == "ADVICE"

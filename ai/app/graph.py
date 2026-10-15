@@ -9,7 +9,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 
 from app.business import ASK_BUSINESS_COMPANY, answer_business, source_lines
 from app.financial import ASK_COMPANY, build_table
-from app.guard import CANARY, check_output, is_injection, mask_pii
+from app.guard import CANARY, check_output, is_injection, mask_pii, unverified_numbers
 from app.history import ASK_PERIOD, history_reply, period_range, today_kst
 from app.spring import RecipientNotFound
 from app.transfer import TransferSlots, ask_for, merge
@@ -23,6 +23,8 @@ INJECTION_REPLY = "요청하신 내용은 처리할 수 없습니다."
 OUTPUT_REPLIES = {
     "PROMPT_LEAK": INJECTION_REPLY,
     "ADVICE": "투자 판단에 대한 조언은 드릴 수 없습니다. 공시와 재무 정보만 안내해 드립니다.",
+    "NUMBER_UNVERIFIED": "답변에 공시 본문에서 확인되지 않은 숫자가 있어 표시하지 않습니다. "
+    "아래 출처에서 원문을 확인해 주세요.",
 }
 EXTRACT_PROMPT = (
     "사용자 메시지에서 의도와 값을 뽑는다. 송금을 요청하거나 아래 진행 중인 송금 정보를 이어서 "
@@ -44,7 +46,8 @@ NOT_FOUND_REPLY = "계좌나 별칭을 찾을 수 없습니다. 받는 분의 �
 # is_history·period: 이번 턴이 내역 조회인지와 조회 기간(오늘·이번 달·지난달·최근 7일).
 # is_financial·companies: 이번 턴이 재무 비교인지와 말한 기업 이름. table: 이번 턴의 재무 비교 표(턴마다 비운다).
 # is_business: 이번 턴이 사업의 내용 질문인지(기업 이름은 companies를 함께 쓴다).
-# footer: 답변 끝에 붙이는 줄(출처 등 코드가 만든 것). 턴마다 비운다.
+# footer: 답변 끝에 붙이는 줄(출처 등 코드가 만든 것). unverified: 답변 숫자 중 근거에 없는 것. 둘 다 턴마다 비운다.
+# 근거 텍스트(공시 블록)는 상태에 두지 않는다 — 체크포인터에 쌓이지 않게 노드 안에서 대조한다.
 class ChatState(MessagesState, total=False):
     message: str
     reply: str
@@ -59,6 +62,7 @@ class ChatState(MessagesState, total=False):
     transfer_card: dict | None
     table: dict | None
     footer: str
+    unverified: list[str]
 
 
 # 입력 가드 → (인젝션이면 바로 종료) → 의도·값 추출 → 일반 답변 | 되묻기 | 송금 요청 생성 | 내역 조회 | 재무 비교
@@ -79,6 +83,7 @@ def build_graph(llm: BaseChatModel, extractor=None):
                 "transfer_card": None,
                 "table": None,
                 "footer": "",
+                "unverified": [],
             }
         return {
             "messages": [HumanMessage(message)],
@@ -86,6 +91,7 @@ def build_graph(llm: BaseChatModel, extractor=None):
             "transfer_card": None,
             "table": None,
             "footer": "",
+            "unverified": [],
         }
 
     def extract(state: ChatState) -> ChatState:
@@ -201,18 +207,18 @@ def build_graph(llm: BaseChatModel, extractor=None):
                 "reply": f"수집 대상에서 찾지 못한 기업입니다: {', '.join(missing)}. "
                 "정식 기업명으로 다시 말씀해 주세요."
             }
-        reply, _ = answer_business(llm, state["messages"], found, chunks)
+        reply, evidence = answer_business(llm, state["messages"], found, chunks)
         footer = source_lines(found, chunks)
         if skipped := [*missing, *empty]:
             footer += f"\n답변하지 못한 기업: {', '.join(skipped)}"
-        return {"reply": reply, "footer": footer}
+        return {"reply": reply, "footer": footer, "unverified": unverified_numbers(reply, evidence)}
 
     # LLM이 쓴 답변은 여기를 거쳐야 나간다. 걸리면 고정 문장으로 바꾸고, 기록에도 바뀐 문장만 남긴다.
-    # footer(출처 등 코드가 만든 줄)는 통과했을 때만 붙인다.
+    # footer(출처 등 코드가 만든 줄)는 통과했거나 숫자만 못 믿을 때 붙인다 — 원문을 확인할 수 있게.
     def output_guard(state: ChatState) -> ChatState:
-        code = check_output(state["reply"])
+        code = check_output(state["reply"], state.get("unverified"))
         reply = OUTPUT_REPLIES.get(code, state["reply"])
-        if code == "PASS" and state.get("footer"):
+        if code in ("PASS", "NUMBER_UNVERIFIED") and state.get("footer"):
             reply += f"\n\n{state['footer']}"
         return {"messages": [AIMessage(reply)], "reply": reply, "guard": code}
 

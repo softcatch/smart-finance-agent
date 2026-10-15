@@ -53,11 +53,14 @@ _ADVICE = (
 
 
 # LLM이 쓴 답변이 나가기 전 판정. 걸린 판정 코드를 돌려주고, 통과면 "PASS".
-def check_output(reply: str) -> str:
+# unverified: 근거에 없는 숫자 목록(unverified_numbers). 근거가 없는 답변은 대조하지 않으므로 비워 둔다.
+def check_output(reply: str, unverified: list[str] | None = None) -> str:
     if CANARY in reply:
         return "PROMPT_LEAK"
     if any(phrase in reply for phrase in _ADVICE):
         return "ADVICE"
+    if unverified:
+        return "NUMBER_UNVERIFIED"
     return "PASS"
 
 
