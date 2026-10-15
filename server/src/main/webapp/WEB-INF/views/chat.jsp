@@ -7,16 +7,16 @@
 <title>채팅</title>
 <link rel="stylesheet" href="/css/smart.css">
 </head>
-<body>
+<body class="chat">
 <%@ include file="nav.jspf" %>
 <main>
 <h1>채팅</h1>
-<div id="log" style="white-space: pre-wrap"></div>
+<div id="log"></div>
+<p id="msg"></p>
 <form id="chat-form">
   <input name="message" placeholder="메시지" autocomplete="off" required>
   <button type="submit">전송</button>
 </form>
-<p id="msg"></p>
 </main>
 <script>
 const token = localStorage.getItem('accessToken');
@@ -34,15 +34,29 @@ async function call(path, body) {
   return res.json();
 }
 
-function add(who, text) {
-  const p = document.createElement('p');
-  p.textContent = who + ': ' + text;
-  log.appendChild(p);
+// 말풍선 한 줄. 내 메시지(me)는 오른쪽, AI(ai)는 왼쪽에 붙는다(CSS). 확인 카드·표는 AI 말풍선 아래에 붙는다.
+function render(item) {
+  const row = document.createElement('div');
+  row.className = 'msg msg-' + item.who;
+  if (item.who === 'ai') {
+    const name = document.createElement('span');
+    name.className = 'who';
+    name.textContent = 'AI';
+    row.appendChild(name);
+  }
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = item.text;
+  row.appendChild(bubble);
+  if (item.card) addCard(row, item.card);
+  if (item.table) addTable(row, item.table);
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
 }
 
 // 송금 확인 카드(FR-009). [보내기]는 AI 경로를 거치지 않고 화면이 Spring에 직접 확정한다.
 // 요청ID는 1회용이다 — 성공하거나 비밀번호가 틀리면(폐기됨) 다시 누를 수 없게 막는다.
-function addCard(card) {
+function addCard(row, card) {
   const box = document.createElement('div');
   box.className = 'transfer-card';
 
@@ -85,14 +99,13 @@ function addCard(card) {
   });
 
   box.append(info, password, button, result);
-  log.appendChild(box);
+  row.appendChild(box);
 }
 
 // 재무 비교 표(E-11 table). 값은 서버가 만든 문자열이라 textContent로만 넣는다.
-function addTable(t) {
+function addTable(row, t) {
   const table = document.createElement('table');
   table.className = 'fin-table';
-  table.border = '1';
   const head = document.createElement('thead');
   const headRow = document.createElement('tr');
   t.columns.forEach((text) => {
@@ -112,12 +125,12 @@ function addTable(t) {
     body.appendChild(tr);
   });
   table.append(head, body);
-  log.appendChild(table);
+  row.appendChild(table);
   if (t.note) {
     const note = document.createElement('p');
     note.className = 'fin-note';
     note.textContent = t.note;
-    log.appendChild(note);
+    row.appendChild(note);
   }
 }
 
@@ -135,14 +148,12 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
   input.value = '';
   button.disabled = true;
   msg.textContent = '';
-  add('나', text);
+  render({ who: 'me', text });
   try {
     const threadId = await ready;
     const body = await call('/api/v1/chat/threads/' + threadId + '/messages', { message: text });
     if (body.success) {
-      add('AI', body.data.reply);
-      if (body.data.transferCard) addCard(body.data.transferCard);
-      if (body.data.table) addTable(body.data.table);
+      render({ who: 'ai', text: body.data.reply, card: body.data.transferCard, table: body.data.table });
     } else {
       msg.textContent = body.error.message;
     }

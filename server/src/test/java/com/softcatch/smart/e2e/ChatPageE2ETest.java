@@ -2,8 +2,10 @@ package com.softcatch.smart.e2e;
 
 import static com.microsoft.playwright.assertions.PlaywrightAssertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.microsoft.playwright.Locator;
+import com.microsoft.playwright.options.BoundingBox;
 import com.softcatch.smart.TestcontainersConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,8 +26,22 @@ class ChatPageE2ETest extends E2ETestBase {
     page.fill("input[name=message]", "안녕");
     page.click("#chat-form button");
 
-    assertThat(page.locator("#log")).containsText("나: 안녕");
-    assertThat(page.locator("#log")).containsText("AI: 안녕하세요"); // 가짜 FastAPI의 기본 답변
+    assertThat(page.locator(".msg-me .bubble")).hasText("안녕");
+    assertThat(page.locator(".msg-ai .bubble")).hasText("안녕하세요"); // 가짜 FastAPI의 기본 답변
+  }
+
+  @Test
+  void 내_말풍선은_오른쪽_AI_말풍선은_왼쪽에_보인다() {
+    signIn(signupAndLogin("말풍선유저"));
+
+    page.navigate(url("/chat"));
+    page.fill("input[name=message]", "안녕");
+    page.click("#chat-form button");
+    assertThat(page.locator(".msg-ai .bubble")).hasText("안녕하세요");
+
+    BoundingBox me = page.locator(".msg-me .bubble").boundingBox();
+    BoundingBox ai = page.locator(".msg-ai .bubble").boundingBox();
+    assertTrue(me.x > ai.x, "내 말풍선이 AI 말풍선보다 오른쪽에 있어야 한다");
   }
 
   @Test

@@ -159,3 +159,121 @@ td button {
   background: #fff;
   color: var(--navy);
 }
+
+/* 채팅: 화면 높이를 꽉 채우고 대화 영역만 스크롤한다. 내 말풍선은 오른쪽 네이비, AI는 왼쪽 흰색 */
+body.chat {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+}
+
+body.chat main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  padding-bottom: 16px;
+}
+
+body.chat h1 {
+  margin: 16px 0;
+  font-size: 20px;
+}
+
+#log {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 8px 0;
+  overflow-y: auto;
+}
+
+#chat-form {
+  flex-wrap: nowrap;
+  margin: 0;
+}
+
+#msg {
+  min-height: 24px;
+  margin: 4px 0;
+}
+
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 85%;
+}
+
+.msg-me {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.msg-ai {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.who {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bubble {
+  padding: 12px 16px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg-me .bubble {
+  border-radius: 4px 4px 0 4px;
+  background: var(--navy);
+  color: #fff;
+}
+
+.msg-ai .bubble {
+  border: 1px solid var(--line);
+  border-radius: 4px 4px 4px 0;
+  background: #fff;
+}
+
+/* 송금 확인 카드·재무 표는 AI 말풍선 아래에 붙는다 */
+.transfer-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(360px, 100%);
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.transfer-card input {
+  flex: none;
+}
+
+.transfer-card p {
+  margin: 0;
+  color: #000;
+}
+
+.transfer-card p.card-result {
+  color: var(--navy);
+  font-weight: 500;
+}
+
+.transfer-card .card-result:empty {
+  display: none;
+}
+
+.fin-note {
+  margin: 0;
+  font-size: 12px;
+}
