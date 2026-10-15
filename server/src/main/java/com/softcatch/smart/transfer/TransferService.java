@@ -11,8 +11,11 @@ import com.softcatch.smart.transfer.dto.response.TransferConfirmResponse;
 import com.softcatch.smart.transfer.dto.response.TransferCreateResponse;
 import com.softcatch.smart.transfer.dto.response.TransferHistoryItem;
 import com.softcatch.smart.transfer.dto.response.TransferHistoryListResponse;
+import com.softcatch.smart.transfer.dto.response.TransferSummaryResponse;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.domain.Pageable;
@@ -31,6 +34,7 @@ class TransferService {
 
   private static final Duration REQUEST_TTL = Duration.ofMinutes(5);
   private static final int DEFAULT_PAGE_SIZE = 20;
+  private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
   private final TransferRequestRepository transferRequests;
   private final TransferRepository transfers;
@@ -197,5 +201,37 @@ class TransferService {
     Long nextCursor = hasNext ? items.get(items.size() - 1).transferId() : null;
 
     return new TransferHistoryListResponse(items, nextCursor, hasNext);
+  }
+
+  // I-04: 기간(from~to, 한국 시간 하루 단위 양끝 포함) 내 합계와 내역. 합계는 여기서(DB 집계로) 계산한다.
+  TransferSummaryResponse summary(
+      Long memberId, LocalDate from, LocalDate to, Long cursor, Integer size) {
+    int pageSize = size != null ? size : DEFAULT_PAGE_SIZE;
+
+    List<String> myAccountNumbers =
+        accounts.findByMemberIdOrderByIdAsc(memberId).stream()
+            .map(Account::getAccountNumber)
+            .toList();
+    if (myAccountNumbers.isEmpty()) {
+      return new TransferSummaryResponse(0L, 0L, 0, List.of(), null, false);
+    }
+
+    Instant start = from.atStartOfDay(KST).toInstant();
+    Instant end = to.plusDays(1).atStartOfDay(KST).toInstant();
+
+    List<TransferHistoryItem> rows =
+        transfers.findHistoryBetween(
+            myAccountNumbers, start, end, cursor, Pageable.ofSize(pageSize + 1));
+    boolean hasNext = rows.size() > pageSize;
+    List<TransferHistoryItem> items = hasNext ? rows.subList(0, pageSize) : rows;
+    Long nextCursor = hasNext ? items.get(items.size() - 1).transferId() : null;
+
+    return new TransferSummaryResponse(
+        transfers.sumSent(myAccountNumbers, start, end),
+        transfers.sumReceived(myAccountNumbers, start, end),
+        Math.toIntExact(transfers.countBetween(myAccountNumbers, start, end)),
+        items,
+        nextCursor,
+        hasNext);
   }
 }

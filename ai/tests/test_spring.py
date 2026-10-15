@@ -1,7 +1,9 @@
+from datetime import date
+
 import httpx
 import pytest
 
-from app.spring import RecipientNotFound, create_transfer_request
+from app.spring import RecipientNotFound, create_transfer_request, get_transfer_history
 
 CARD = {
     "requestId": "tr_7f3a",
@@ -63,3 +65,36 @@ def test_Spring_오류는_그대로_올린다(monkeypatch):
 
     with pytest.raises(httpx.HTTPStatusError):
         create_transfer_request("jwt-1", {"amount": 10000, "alias": "엄마"})
+
+
+SUMMARY = {"sentTotal": 5000, "receivedTotal": 1000, "count": 3, "items": [], "hasNext": False}
+
+
+def _fake_get(monkeypatch, calls: list, status: int = 200, body: dict | None = None):
+    def get(url, **kwargs):
+        calls.append((url, kwargs))
+        payload = body if body is not None else {"success": True, "data": SUMMARY, "error": None}
+        return httpx.Response(status, json=payload, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", get)
+
+
+def test_기간과_JWT를_Spring에_전달하고_요약을_돌려준다(monkeypatch):
+    monkeypatch.setenv("SMART_SERVER_BASE_URL", "http://server:8080")
+    calls: list = []
+    _fake_get(monkeypatch, calls)
+
+    summary = get_transfer_history("jwt-1", date(2026, 10, 1), date(2026, 10, 15))
+
+    url, kwargs = calls[0]
+    assert url == "http://server:8080/internal/transfers"
+    assert kwargs["headers"] == {"Authorization": "Bearer jwt-1"}
+    assert kwargs["params"] == {"from": "2026-10-01", "to": "2026-10-15", "size": 5}
+    assert summary == SUMMARY
+
+
+def test_내역_조회_Spring_오류는_그대로_올린다(monkeypatch):
+    _fake_get(monkeypatch, [], status=500, body={"success": False})
+
+    with pytest.raises(httpx.HTTPStatusError):
+        get_transfer_history("jwt-1", date(2026, 10, 1), date(2026, 10, 15))

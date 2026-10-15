@@ -6,6 +6,9 @@ import com.softcatch.smart.transfer.dto.request.TransferCreateRequest;
 import com.softcatch.smart.transfer.dto.response.TransferConfirmResponse;
 import com.softcatch.smart.transfer.dto.response.TransferCreateResponse;
 import com.softcatch.smart.transfer.dto.response.TransferHistoryListResponse;
+import com.softcatch.smart.transfer.dto.response.TransferSummaryResponse;
+import java.time.LocalDate;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -49,5 +52,17 @@ class TransferController {
       @RequestParam(required = false) Long cursor,
       @RequestParam(required = false) Integer size) {
     return ApiResponse.ok(transferService.list(Long.valueOf(jwt.getSubject()), cursor, size));
+  }
+
+  // FastAPI(LangGraph 도구)용 — 사용자 JWT로 본인 내역만 본다. 합계는 Spring이 계산한다(NFR-002).
+  @GetMapping("/internal/transfers")
+  ApiResponse<TransferSummaryResponse> summary(
+      @AuthenticationPrincipal Jwt jwt,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+      @RequestParam(required = false) Long cursor,
+      @RequestParam(required = false) Integer size) {
+    return ApiResponse.ok(
+        transferService.summary(Long.valueOf(jwt.getSubject()), from, to, cursor, size));
   }
 }

@@ -1,9 +1,12 @@
+from datetime import date
+
 from fastapi.testclient import TestClient
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
 from app.graph import INJECTION_REPLY, SYSTEM_PROMPT, build_graph
+from app.history import ASK_PERIOD
 from app.main import app, get_graph
 from app.spring import RecipientNotFound
 from app.transfer import TransferSlots
@@ -17,13 +20,39 @@ CARD = {
     "expiresAt": "2026-09-27T10:05:00+09:00",
 }
 CARD_REPLY = "김영희님께 10,000원을 보낼까요? 아래 확인 카드에서 [보내기]를 눌러 주세요."
+SUMMARY = {
+    "sentTotal": 120000,
+    "receivedTotal": 50000,
+    "count": 2,
+    "items": [
+        {
+            "transferId": 2,
+            "direction": "SENT",
+            "counterpartName": "이철수",
+            "counterpartAccountNumber": "123456789012",
+            "amount": 120000,
+            "createdAt": "2026-10-03T06:44:34.678254Z",
+        },
+        {
+            "transferId": 1,
+            "direction": "RECEIVED",
+            "counterpartName": "김영희",
+            "counterpartAccountNumber": "545202533867",
+            "amount": 50000,
+            "createdAt": "2026-10-02T06:44:34.605143Z",
+        },
+    ],
+    "hasNext": False,
+}
 
 
-# create_transfer: 송금 요청 생성 함수(JWT를 쥔 채로 요청마다 config에 넣는다)
-def _cfg(thread_id: str, create_transfer=None) -> dict:
+# create_transfer·get_history: Spring 호출 함수(JWT를 쥔 채로 요청마다 config에 넣는다)
+def _cfg(thread_id: str, create_transfer=None, get_history=None) -> dict:
     configurable = {"thread_id": thread_id}
     if create_transfer:
         configurable["create_transfer"] = create_transfer
+    if get_history:
+        configurable["get_history"] = get_history
     return {"configurable": configurable}
 
 
@@ -313,3 +342,111 @@ def test_엔드포인트_확인_카드를_돌려주고_JWT는_기록에_남지_�
     assert res.json()["data"] == {"reply": CARD_REPLY, "guard": "PASS", "transferCard": CARD}
     assert calls == [("jwt-secret-1", {"amount": 10000, "alias": "엄마"})]
     assert "jwt-secret-1" not in repr(vars(graph.checkpointer))  # JWT가 대화 기록에 없다
+
+
+def test_내역을_물으면_Spring_합계로_답하고_LLM은_부르지_않는다(monkeypatch):
+    monkeypatch.setattr("app.graph.today_kst", lambda: date(2026, 10, 15))
+    llm, seen = _spy()
+    graph = build_graph(
+        llm, _extractor(TransferSlots(is_transfer=False, is_history=True, period="this_month"))
+    )
+    calls: list[tuple] = []
+
+    def get_history(start, end):
+        calls.append((start, end))
+        return SUMMARY
+
+    out = graph.invoke({"message": "이번 달 얼마 보냈어?"}, _cfg("th_1", get_history=get_history))
+
+    assert calls == [(date(2026, 10, 1), date(2026, 10, 15))]
+    assert "보낸 금액은 120,000원, 받은 금액은 50,000원" in out["reply"]  # Spring 값 그대로
+    assert out["transfer_card"] is None
+    assert seen == []  # 숫자를 LLM이 만들지 않는다 — 답변 LLM을 부르지 않는다
+
+
+def test_기간을_모르면_조회하지_않고_안내한다():
+    graph = build_graph(
+        _spy()[0], _extractor(TransferSlots(is_transfer=False, is_history=True, period=None))
+    )
+
+    def get_history(start, end):
+        raise AssertionError("호출되면 안 됨")
+
+    out = graph.invoke({"message": "작년에 얼마 보냈어?"}, _cfg("th_1", get_history=get_history))
+
+    assert out["reply"] == ASK_PERIOD
+
+
+def test_송금과_내역이_함께_true면_송금이_우선이다():
+    graph = build_graph(
+        _spy()[0],
+        _extractor(
+            TransferSlots(
+                is_transfer=True, is_history=True, period="this_month", amount=10000, alias="엄마"
+            )
+        ),
+    )
+
+    def get_history(start, end):
+        raise AssertionError("호출되면 안 됨")
+
+    out = graph.invoke(
+        {"message": "엄마한테 1만원 보내줘"},
+        _cfg("th_1", create_transfer=lambda pending: CARD, get_history=get_history),
+    )
+
+    assert out["transfer_card"] == CARD
+
+
+def test_송금_진행_중_내역을_물으면_송금은_접힌다(monkeypatch):
+    monkeypatch.setattr("app.graph.today_kst", lambda: date(2026, 10, 15))
+    graph = build_graph(
+        _spy()[0],
+        _extractor(
+            TransferSlots(is_transfer=True, alias="엄마"),
+            TransferSlots(is_transfer=False, is_history=True, period="today"),
+            TransferSlots(is_transfer=True, amount=5000),
+        ),
+    )
+
+    def create(pending):
+        raise AssertionError("호출되면 안 됨")
+
+    cfg = _cfg("th_1", create, lambda start, end: SUMMARY)
+    graph.invoke({"message": "엄마한테 보내줘"}, cfg)
+    graph.invoke({"message": "오늘 얼마 보냈어?"}, cfg)
+    out = graph.invoke({"message": "5천 원 보내줘"}, cfg)
+
+    assert "누구에게" in out["reply"]  # 앞서 말한 '엄마'는 접혔다
+
+
+def test_엔드포인트_내역_조회는_JWT를_전달하고_카드를_내리지_않는다(monkeypatch):
+    monkeypatch.setattr("app.graph.today_kst", lambda: date(2026, 10, 15))
+    calls: list[tuple] = []
+
+    def fake_history(token, start, end):
+        calls.append((token, start, end))
+        return SUMMARY
+
+    monkeypatch.setattr("app.main.get_transfer_history", fake_history)
+    graph = build_graph(
+        _spy()[0],
+        _extractor(TransferSlots(is_transfer=False, is_history=True, period="last_month")),
+    )
+    app.dependency_overrides[get_graph] = lambda: graph
+    try:
+        res = TestClient(app).post(
+            "/internal/chat",
+            headers={"Authorization": "Bearer jwt-secret-2"},
+            json={"threadId": "th_1", "message": "지난달 얼마 보냈어?"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert res.status_code == 200
+    data = res.json()["data"]
+    assert data["guard"] == "PASS"
+    assert "보낸 금액은 120,000원" in data["reply"]
+    assert "transferCard" not in data
+    assert calls == [("jwt-secret-2", date(2026, 9, 1), date(2026, 9, 30))]
+    assert "jwt-secret-2" not in repr(vars(graph.checkpointer))  # JWT가 대화 기록에 없다
