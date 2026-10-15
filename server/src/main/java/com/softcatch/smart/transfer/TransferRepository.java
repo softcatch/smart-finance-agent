@@ -1,6 +1,7 @@
 package com.softcatch.smart.transfer;
 
 import com.softcatch.smart.transfer.dto.response.TransferHistoryItem;
+import java.time.Instant;
 import java.util.List;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -28,4 +29,45 @@ public interface TransferRepository extends JpaRepository<Transfer, Long> {
           + "ORDER BY t.id DESC")
   List<TransferHistoryItem> findHistory(
       List<String> myAccountNumbers, Long cursor, Pageable pageable);
+
+  // 기간 조회(I-04) — 합계는 같은 조건(내 계좌 컬럼 직접, [start, end))으로 집계한다.
+  // 내 계좌끼리의 송금은 목록의 방향 규칙과 같게 보낸 쪽으로만 센다.
+  @Query(
+      "SELECT COALESCE(SUM(t.amount), 0L) FROM Transfer t "
+          + "WHERE t.fromAccountNumber IN :myAccountNumbers "
+          + "AND t.createdAt >= :start AND t.createdAt < :end")
+  Long sumSent(List<String> myAccountNumbers, Instant start, Instant end);
+
+  @Query(
+      "SELECT COALESCE(SUM(t.amount), 0L) FROM Transfer t "
+          + "WHERE t.toAccountNumber IN :myAccountNumbers "
+          + "AND t.fromAccountNumber NOT IN :myAccountNumbers "
+          + "AND t.createdAt >= :start AND t.createdAt < :end")
+  Long sumReceived(List<String> myAccountNumbers, Instant start, Instant end);
+
+  @Query(
+      "SELECT COUNT(t) FROM Transfer t "
+          + "WHERE (t.fromAccountNumber IN :myAccountNumbers "
+          + "OR t.toAccountNumber IN :myAccountNumbers) "
+          + "AND t.createdAt >= :start AND t.createdAt < :end")
+  long countBetween(List<String> myAccountNumbers, Instant start, Instant end);
+
+  // findHistory와 같은 SELECT에 기간 조건만 더했다(E-09 쿼리는 건드리지 않는다).
+  @Query(
+      "SELECT new com.softcatch.smart.transfer.dto.response.TransferHistoryItem("
+          + "t.id, "
+          + "CASE WHEN t.fromAccountNumber IN :myAccountNumbers THEN 'SENT' ELSE 'RECEIVED' END, "
+          + "counterpartMember.name, "
+          + "CASE WHEN t.fromAccountNumber IN :myAccountNumbers THEN t.toAccountNumber ELSE t.fromAccountNumber END, "
+          + "t.amount, t.createdAt) "
+          + "FROM Transfer t, Account counterpartAccount, Member counterpartMember "
+          + "WHERE counterpartAccount.accountNumber = "
+          + "  CASE WHEN t.fromAccountNumber IN :myAccountNumbers THEN t.toAccountNumber ELSE t.fromAccountNumber END "
+          + "AND counterpartMember.id = counterpartAccount.memberId "
+          + "AND (t.fromAccountNumber IN :myAccountNumbers OR t.toAccountNumber IN :myAccountNumbers) "
+          + "AND t.createdAt >= :start AND t.createdAt < :end "
+          + "AND (:cursor IS NULL OR t.id < :cursor) "
+          + "ORDER BY t.id DESC")
+  List<TransferHistoryItem> findHistoryBetween(
+      List<String> myAccountNumbers, Instant start, Instant end, Long cursor, Pageable pageable);
 }

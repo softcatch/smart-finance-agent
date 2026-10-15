@@ -12,6 +12,8 @@ import com.softcatch.smart.common.ApiException;
 import com.softcatch.smart.transfer.dto.request.TransferConfirmRequest;
 import com.softcatch.smart.transfer.dto.request.TransferCreateRequest;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -27,6 +29,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
@@ -41,6 +44,7 @@ import tools.jackson.databind.ObjectMapper;
 class TransferControllerTest {
 
   private static final String ACCOUNT_PASSWORD = "1234";
+  private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
   private record MemberSession(Long memberId, String token) {}
 
@@ -51,6 +55,7 @@ class TransferControllerTest {
   @Autowired private TransferRequestRepository transferRequests;
   @Autowired private TransferRepository transfers;
   @Autowired private AccountRepository accounts;
+  @Autowired private JdbcTemplate jdbc;
   private final ObjectMapper json = new ObjectMapper();
 
   @Test
@@ -388,6 +393,134 @@ class TransferControllerTest {
   }
 
   @Test
+  void 내역_요약_기간_내_보낸_받은_합계와_건수() throws Exception {
+    MemberSession a = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "요약A");
+    AccountInfo accountA = openAccount(a.token());
+    charge(a.token(), accountA.accountId(), 20000L);
+    MemberSession b = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "요약B");
+    AccountInfo accountB = openAccount(b.token());
+    charge(b.token(), accountB.accountId(), 5000L);
+    sendAndConfirm(a.token(), accountB.accountNumber(), 3000L);
+    sendAndConfirm(a.token(), accountB.accountNumber(), 2000L);
+    sendAndConfirm(b.token(), accountA.accountNumber(), 1000L);
+
+    // A와 무관한 송금은 합계에 들어가지 않는다
+    MemberSession c = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "요약C");
+    AccountInfo accountC = openAccount(c.token());
+    charge(c.token(), accountC.accountId(), 9000L);
+    sendAndConfirm(c.token(), accountB.accountNumber(), 9000L);
+
+    LocalDate today = LocalDate.now(KST);
+    JsonNode data = summary(a.token(), today, today, null, null);
+
+    Assertions.assertEquals(5000L, data.at("/sentTotal").asLong());
+    Assertions.assertEquals(1000L, data.at("/receivedTotal").asLong());
+    Assertions.assertEquals(3, data.at("/count").asInt());
+    Assertions.assertEquals(3, data.at("/items").size());
+    Assertions.assertEquals("RECEIVED", data.at("/items/0/direction").asText()); // 최신순
+    Assertions.assertEquals("요약B", data.at("/items/0/counterpartName").asText());
+  }
+
+  @Test
+  void 내역_요약_기간_경계는_한국_시간_하루() throws Exception {
+    MemberSession a = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "경계A");
+    AccountInfo accountA = openAccount(a.token());
+    charge(a.token(), accountA.accountId(), 10000L);
+    MemberSession b = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "경계B");
+    AccountInfo accountB = openAccount(b.token());
+    sendAndConfirm(a.token(), accountB.accountNumber(), 1000L);
+    sendAndConfirm(a.token(), accountB.accountNumber(), 2000L);
+
+    // 3/10 23:59:59 KST와 3/11 00:00:00 KST — 하루 경계의 양쪽
+    List<Long> ids =
+        transfers.findAll().stream()
+            .filter(t -> t.getFromAccountNumber().equals(accountA.accountNumber()))
+            .map(Transfer::getId)
+            .sorted()
+            .toList();
+    setCreatedAt(ids.get(0), "2026-03-10T23:59:59+09:00");
+    setCreatedAt(ids.get(1), "2026-03-11T00:00:00+09:00");
+
+    JsonNode tenth =
+        summary(
+            a.token(), LocalDate.parse("2026-03-10"), LocalDate.parse("2026-03-10"), null, null);
+    JsonNode eleventh =
+        summary(
+            a.token(), LocalDate.parse("2026-03-11"), LocalDate.parse("2026-03-11"), null, null);
+    JsonNode both =
+        summary(
+            a.token(), LocalDate.parse("2026-03-10"), LocalDate.parse("2026-03-11"), null, null);
+
+    Assertions.assertEquals(1000L, tenth.at("/sentTotal").asLong());
+    Assertions.assertEquals(2000L, eleventh.at("/sentTotal").asLong());
+    Assertions.assertEquals(3000L, both.at("/sentTotal").asLong());
+    Assertions.assertEquals(2, both.at("/count").asInt());
+  }
+
+  @Test
+  void 내역_요약_페이지를_나눠도_합계는_전체_기간() throws Exception {
+    MemberSession a = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "페이지A");
+    AccountInfo accountA = openAccount(a.token());
+    charge(a.token(), accountA.accountId(), 10000L);
+    MemberSession b = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "페이지B");
+    AccountInfo accountB = openAccount(b.token());
+    for (int i = 0; i < 3; i++) {
+      sendAndConfirm(a.token(), accountB.accountNumber(), 1000L);
+    }
+
+    LocalDate today = LocalDate.now(KST);
+    JsonNode first = summary(a.token(), today, today, null, 2);
+    JsonNode second = summary(a.token(), today, today, first.at("/nextCursor").asLong(), 2);
+
+    Assertions.assertEquals(2, first.at("/items").size());
+    Assertions.assertTrue(first.at("/hasNext").asBoolean());
+    Assertions.assertEquals(3000L, first.at("/sentTotal").asLong()); // 페이지가 아니라 전체 기간
+    Assertions.assertEquals(3, first.at("/count").asInt());
+    Assertions.assertEquals(1, second.at("/items").size());
+    Assertions.assertFalse(second.at("/hasNext").asBoolean());
+  }
+
+  @Test
+  void 내역_요약_내_계좌끼리_송금은_보낸_쪽으로만_센다() throws Exception {
+    MemberSession a = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "내계좌");
+    AccountInfo primary = openAccount(a.token());
+    AccountInfo second = openAccount(a.token());
+    charge(a.token(), primary.accountId(), 5000L);
+    sendAndConfirm(a.token(), second.accountNumber(), 1000L);
+
+    LocalDate today = LocalDate.now(KST);
+    JsonNode data = summary(a.token(), today, today, null, null);
+
+    Assertions.assertEquals(1000L, data.at("/sentTotal").asLong());
+    Assertions.assertEquals(0L, data.at("/receivedTotal").asLong());
+    Assertions.assertEquals(1, data.at("/count").asInt());
+    Assertions.assertEquals("SENT", data.at("/items/0/direction").asText());
+  }
+
+  @Test
+  void 내역_요약_계좌가_없으면_0과_빈_목록() throws Exception {
+    MemberSession a = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "무계좌");
+
+    LocalDate today = LocalDate.now(KST);
+    JsonNode data = summary(a.token(), today, today, null, null);
+
+    Assertions.assertEquals(0L, data.at("/sentTotal").asLong());
+    Assertions.assertEquals(0L, data.at("/receivedTotal").asLong());
+    Assertions.assertEquals(0, data.at("/count").asInt());
+    Assertions.assertEquals(0, data.at("/items").size());
+  }
+
+  @Test
+  void 내역_요약_인증_없으면_401() throws Exception {
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.get("/internal/transfers")
+                .param("from", "2026-03-10")
+                .param("to", "2026-03-11"))
+        .andExpect(MockMvcResultMatchers.status().isUnauthorized());
+  }
+
+  @Test
   void 동시_확정_후_성공은_1번만() throws Exception {
     MemberSession recipient = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "수취인7");
     AccountInfo recipientAccount = openAccount(recipient.token());
@@ -643,6 +776,41 @@ class TransferControllerTest {
   private JsonNode listHistory(String token, Long cursor, Integer size) throws Exception {
     MockHttpServletRequestBuilder request =
         MockMvcRequestBuilders.get("/api/v1/transfers").header("Authorization", "Bearer " + token);
+    if (cursor != null) {
+      request = request.param("cursor", cursor.toString());
+    }
+    if (size != null) {
+      request = request.param("size", size.toString());
+    }
+    String body =
+        mockMvc
+            .perform(request)
+            .andExpect(MockMvcResultMatchers.status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    return json.readTree(body).at("/data");
+  }
+
+  private void sendAndConfirm(String token, String recipientAccountNumber, Long amount)
+      throws Exception {
+    confirmTransfer(token, createTransferRequest(token, recipientAccountNumber, null, amount));
+  }
+
+  private void setCreatedAt(Long transferId, String isoOffsetDateTime) {
+    jdbc.update(
+        "UPDATE transfer SET created_at = ?::timestamptz WHERE id = ?",
+        isoOffsetDateTime,
+        transferId);
+  }
+
+  private JsonNode summary(String token, LocalDate from, LocalDate to, Long cursor, Integer size)
+      throws Exception {
+    MockHttpServletRequestBuilder request =
+        MockMvcRequestBuilders.get("/internal/transfers")
+            .header("Authorization", "Bearer " + token)
+            .param("from", from.toString())
+            .param("to", to.toString());
     if (cursor != null) {
       request = request.param("cursor", cursor.toString());
     }
