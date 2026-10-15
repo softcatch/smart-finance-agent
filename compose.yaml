@@ -17,6 +17,9 @@ services:
 
   server:
     build: ./server
+    # 배포 서버는 Docker Hub에서 받은 이미지를 이 이름으로 태그해 쓴다(.github/workflows/deploy.yml).
+    # 로컬에서는 build가 만든 이미지의 이름일 뿐이다.
+    image: smart-finance-agent-server
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
@@ -32,6 +35,7 @@ services:
   # 내부 전용: 포트를 밖으로 열지 않는다(Spring만 호출)
   ai:
     build: ./ai
+    image: smart-finance-agent-ai
     environment:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-nano}
@@ -48,6 +52,7 @@ services:
   # 재무 테이블은 이 컨테이너가 DB에 직접 쓴다(FastAPI 소유). DART_API_KEY가 없으면 안내만 하고 다음 주기를 기다린다.
   collector:
     build: ./ai
+    image: smart-finance-agent-ai
     command: ["sh", "-c", "while true; do uv run --no-sync python -m app.collect; sleep 86400; done"]
     environment:
       DART_API_KEY: ${DART_API_KEY:-}

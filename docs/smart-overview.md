@@ -267,7 +267,7 @@ cAdvisor (컨테이너 CPU·메모리) ─────────────�
 | 백엔드 | Spring Boot 4.1.1, Java 17, JPA, JWT. FastAPI 호출: RestClient(1단계) → WebClient(2단계) |
 | AI | FastAPI, LangGraph, OpenAI(LLM·임베딩) |
 | DB | PostgreSQL 하나 (회원·계좌·송금 + 재무 테이블 + pgvector) |
-| 배포 | Docker Compose로 로컬 실행(Spring Boot·FastAPI 모두) → 추후 AWS EC2 |
+| 배포 | Docker Compose로 로컬 실행(Spring Boot·FastAPI 모두). 홈서버: `main` 머지 시 GitHub Actions가 이미지를 빌드해 Docker Hub에 올리고 SSH로 pull·재실행 → 추후 AWS EC2 |
 | 테스트·모니터링 | k6(Prometheus remote write), Prometheus(Spring Actuator·FastAPI·postgres_exporter·cAdvisor), Grafana |
 
 ---
