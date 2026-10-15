@@ -89,3 +89,13 @@ def _numbers(text: str) -> list[str]:
 def unverified_numbers(reply: str, evidence: str) -> list[str]:
     known = set(_numbers(evidence))
     return [n for n in dict.fromkeys(_numbers(reply)) if n not in known]
+
+
+# 가드에 걸리면 LLM 답변 대신 나가는 고정 문장(판정 코드별)
+INJECTION_REPLY = "요청하신 내용은 처리할 수 없습니다."
+OUTPUT_REPLIES = {
+    "PROMPT_LEAK": INJECTION_REPLY,
+    "ADVICE": "투자 판단에 대한 조언은 드릴 수 없습니다. 공시와 재무 정보만 안내해 드립니다.",
+    "NUMBER_UNVERIFIED": "답변에 공시 본문에서 확인되지 않은 숫자가 있어 표시하지 않습니다. "
+    "아래 출처에서 원문을 확인해 주세요.",
+}
