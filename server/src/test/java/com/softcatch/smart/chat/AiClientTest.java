@@ -1,5 +1,6 @@
 package com.softcatch.smart.chat;
 
+import com.softcatch.smart.chat.dto.response.ChatDetailResponse;
 import com.softcatch.smart.chat.dto.response.ChatMessageResponse;
 import com.softcatch.smart.common.ApiException;
 import java.time.Duration;
@@ -16,7 +17,7 @@ class AiClientTest {
   @BeforeEach
   void setUp() throws Exception {
     fake = new FakeAiServer();
-    client = new AiClient(fake.baseUrl(), Duration.ofSeconds(1));
+    client = new AiClient(fake.baseUrl(), Duration.ofSeconds(1), Duration.ofSeconds(1));
   }
 
   @AfterEach
@@ -97,5 +98,33 @@ class AiClientTest {
     fake.close();
 
     Assertions.assertThrows(ApiException.class, () -> client.chat("t", "th_1", "안녕"));
+  }
+
+  @Test
+  void 상세_보기는_보고서와_표를_파싱하고_JWT를_전달한다() {
+    ChatDetailResponse res = client.detail("jwt-token", "dt_91c2");
+
+    Assertions.assertEquals("dt_91c2", res.detailId());
+    Assertions.assertEquals("보고서입니다", res.report());
+    Assertions.assertEquals(java.util.List.of("기간", "항목", "삼성전자"), res.table().columns());
+    Assertions.assertEquals("/internal/details/dt_91c2", fake.lastDetailPath);
+    Assertions.assertEquals("Bearer jwt-token", fake.lastDetailAuthorization);
+  }
+
+  // 404 → DETAIL_NOT_FOUND, 그 밖 → AI_SERVER_UNAVAILABLE 구분은 컨트롤러 테스트가 응답 코드로 확인한다.
+  @Test
+  void 상세_보기에서_FastAPI가_404거나_5xx면_ApiException() {
+    fake.detailStatus = 404;
+    Assertions.assertThrows(ApiException.class, () -> client.detail("t", "dt_없음"));
+
+    fake.detailStatus = 500;
+    Assertions.assertThrows(ApiException.class, () -> client.detail("t", "dt_1"));
+  }
+
+  @Test
+  void 상세_보기_응답이_읽기_제한을_넘으면_ApiException() {
+    fake.detailDelayMillis = 3000;
+
+    Assertions.assertThrows(ApiException.class, () -> client.detail("t", "dt_1"));
   }
 }
