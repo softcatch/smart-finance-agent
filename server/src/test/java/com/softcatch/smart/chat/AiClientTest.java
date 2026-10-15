@@ -28,9 +28,21 @@ class AiClientTest {
   void 성공하면_reply와_guard를_돌려주고_JWT와_본문을_전달한다() {
     ChatMessageResponse res = client.chat("jwt-token", "th_1", "안녕");
 
-    Assertions.assertEquals(new ChatMessageResponse("안녕하세요", "PASS"), res);
+    Assertions.assertEquals(new ChatMessageResponse("안녕하세요", "PASS", null), res);
     Assertions.assertEquals("Bearer jwt-token", fake.lastAuthorization);
     Assertions.assertEquals("{\"threadId\":\"th_1\",\"message\":\"안녕\"}", fake.lastBody);
+  }
+
+  @Test
+  void 확인_카드가_오면_transferCard로_파싱한다() {
+    fake.responseBody =
+        "{\"success\":true,\"data\":{\"reply\":\"김영희님께 10,000원을 보낼까요?\",\"guard\":\"PASS\",\"transferCard\":{\"requestId\":\"tr_7f3a\",\"recipientName\":\"김영희\",\"recipientAccountNumber\":\"123456789012\",\"fromAccountNumber\":\"987654321098\",\"amount\":10000,\"expiresAt\":\"2026-09-27T10:05:00+09:00\"}},\"error\":null}";
+
+    ChatMessageResponse res = client.chat("t", "th_1", "엄마한테 1만원");
+
+    Assertions.assertEquals("tr_7f3a", res.transferCard().requestId());
+    Assertions.assertEquals("김영희", res.transferCard().recipientName());
+    Assertions.assertEquals(10000L, res.transferCard().amount());
   }
 
   @Test
