@@ -61,7 +61,9 @@ function row(account) {
   amount.placeholder = '충전 금액';
   const button = document.createElement('button');
   button.textContent = '충전';
+  // 충전 API에는 멱등키가 없어 요청마다 잔액이 늘어난다 — 처리 중에는 버튼을 막아 한 번만 보낸다.
   button.addEventListener('click', async () => {
+    button.disabled = true;
     msg.textContent = '';
     try {
       const body = await call('POST', '/api/v1/accounts/' + account.accountId + '/charge', {},
@@ -70,6 +72,8 @@ function row(account) {
       else msg.textContent = body.error.message;
     } catch (err) {
       msg.textContent = '서버에 연결할 수 없습니다.';
+    } finally {
+      button.disabled = false;
     }
   });
   const charge = document.createElement('td');
