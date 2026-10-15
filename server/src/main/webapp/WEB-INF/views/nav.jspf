@@ -1,7 +1,18 @@
 <%@ page pageEncoding="UTF-8" %>
-<nav>
-  <a href="/chat">채팅</a>
-  <a href="/accounts">계좌</a>
-  <a href="/transfers">송금 내역</a>
-  <a href="/aliases">별칭</a>
-</nav>
+<header>
+  <nav>
+    <a href="/chat">채팅</a>
+    <a href="/accounts">계좌</a>
+    <a href="/transfers">송금 내역</a>
+    <a href="/aliases">별칭</a>
+  </nav>
+</header>
+<script>
+// 화면 스크립트와 이름이 겹치지 않게 함수로 감싼다.
+(() => {
+  // 지금 보는 메뉴를 표시한다.
+  document.querySelectorAll('nav a').forEach((a) => {
+    if (a.pathname === location.pathname) a.setAttribute('aria-current', 'page');
+  });
+})();
+</script>

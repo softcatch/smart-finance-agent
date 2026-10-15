@@ -1,9 +1,15 @@
 <%@ page contentType="text/html;charset=UTF-8" isELIgnored="true" %>
 <!DOCTYPE html>
 <html lang="ko">
-<head><meta charset="UTF-8"><title>채팅</title></head>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>채팅</title>
+<link rel="stylesheet" href="/css/smart.css">
+</head>
 <body>
 <%@ include file="nav.jspf" %>
+<main>
 <h1>채팅</h1>
 <div id="log" style="white-space: pre-wrap"></div>
 <form id="chat-form">
@@ -11,6 +17,7 @@
   <button type="submit">전송</button>
 </form>
 <p id="msg"></p>
+</main>
 <script>
 const token = localStorage.getItem('accessToken');
 const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };

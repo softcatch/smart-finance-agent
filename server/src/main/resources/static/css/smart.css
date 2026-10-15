@@ -1,0 +1,161 @@
+/*
+ * 현대닷컴(hyundai.com/kr/ko/e) 톤의 공통 스타일.
+ * 색·크기는 그 페이지 CSS에서 많이 쓰인 값만 뽑았다: 네이비 #002c5f, 웜그레이 #f6f3f2,
+ * 각진 모서리, 좁은 자간(-0.4px), 옅은 그림자. 폰트(Hyundai Sans)·로고·이미지는 상표라 쓰지 않는다.
+ * 요소에 직접 스타일을 줘서 JSP는 이 파일만 연결하면 된다.
+ */
+:root {
+  --navy: #002c5f;
+  --teal: #007fa8;
+  --bg: #f6f3f2;
+  --line: #e4dcd3;
+  --muted: #666;
+  --disabled: #cecdca;
+  --shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: #000;
+  font: 400 16px/1.5 "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  letter-spacing: -0.4px;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 16px 48px;
+}
+
+h1 {
+  margin: 32px 0 24px;
+  color: var(--navy);
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+h2 {
+  margin: 40px 0 12px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+a {
+  color: var(--teal);
+}
+
+p {
+  color: var(--muted);
+}
+
+/* 상단 메뉴: 본문 칸(main)과 왼쪽 끝을 맞춘다 */
+header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 56px;
+  padding: 0 max(16px, calc((100% - 720px) / 2 + 16px));
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+nav {
+  display: flex;
+  gap: 24px;
+}
+
+nav a {
+  border-bottom: 2px solid transparent;
+  color: var(--navy);
+  font-weight: 500;
+  line-height: 53px;
+  text-decoration: none;
+}
+
+nav a[aria-current] {
+  border-bottom-color: var(--navy);
+  font-weight: 700;
+}
+
+/* 입력·버튼: 높이 48px 각진 사각형 */
+form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+input {
+  flex: 1 1 160px;
+  min-width: 0;
+  height: 48px;
+  padding: 0 16px;
+  border: 1px solid #ccc;
+  border-radius: 0;
+  background: #fff;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+input:focus {
+  outline: 0;
+  border-color: var(--navy);
+}
+
+button {
+  height: 48px;
+  padding: 0 24px;
+  border: 1px solid var(--navy);
+  border-radius: 0;
+  background: var(--navy);
+  color: #fff;
+  font: inherit;
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  border-color: var(--disabled);
+  background: var(--disabled);
+  cursor: default;
+}
+
+/* 표: 위쪽 네이비 선, 행 사이는 옅은 베이지 선 */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+th,
+td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+  text-align: left;
+}
+
+th {
+  border-top: 2px solid var(--navy);
+  color: var(--muted);
+  font-weight: 500;
+}
+
+td input {
+  width: 112px;
+  height: 36px;
+}
+
+td button {
+  height: 36px;
+  padding: 0 12px;
+  background: #fff;
+  color: var(--navy);
+}

@@ -1,8 +1,15 @@
 <%@ page contentType="text/html;charset=UTF-8" %>
 <!DOCTYPE html>
 <html lang="ko">
-<head><meta charset="UTF-8"><title>로그인</title></head>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>로그인</title>
+<link rel="stylesheet" href="/css/smart.css">
+</head>
 <body>
+<%@ include file="nav.jspf" %>
+<main>
 <h1>로그인</h1>
 <form id="login-form">
   <input name="loginId" placeholder="아이디" required>
@@ -11,7 +18,7 @@
 </form>
 <p id="msg"></p>
 <a href="/signup">회원가입</a>
-<%@ include file="nav.jspf" %>
+</main>
 <script>
 document.getElementById('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
