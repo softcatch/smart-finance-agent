@@ -10,6 +10,7 @@
   <button type="submit">전송</button>
 </form>
 <p id="msg"></p>
+<a href="/accounts">계좌</a>
 <script>
 const token = localStorage.getItem('accessToken');
 const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };

@@ -20,4 +20,9 @@ class PageController {
   String chatPage() {
     return "chat";
   }
+
+  @GetMapping("/accounts")
+  String accountsPage() {
+    return "accounts";
+  }
 }
