@@ -7,6 +7,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 from app.graph import build_graph
+from app.guard import mask_pii
 
 app = FastAPI(title="smart-ai")
 
@@ -26,13 +27,16 @@ def get_graph():
 
 
 class ChatRequest(BaseModel):
-    threadId: str  # 이번엔 전달만 받는다(대화 맥락은 FR-015)
+    threadId: str  # 체크포인터의 thread_id — 같은 값이면 같은 대화(FR-015)
     message: str
 
 
 @app.post("/internal/chat")
 def chat(req: ChatRequest, graph: Annotated[Any, Depends(get_graph)]) -> dict:
-    out = graph.invoke({"message": req.message})
+    # 그래프 입력도 체크포인터에 저장되므로, 원문이 남지 않게 넣기 전에 가린다.
+    out = graph.invoke(
+        {"message": mask_pii(req.message)}, {"configurable": {"thread_id": req.threadId}}
+    )
     return {
         "success": True,
         "data": {"reply": out["reply"], "guard": out["guard"]},
