@@ -11,6 +11,7 @@
 </form>
 <p id="msg"></p>
 <a href="/signup">회원가입</a>
+<a href="/chat">채팅</a>
 <script>
 document.getElementById('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();
