@@ -17,6 +17,6 @@ def conn(database_url):
 
     with psycopg.connect(database_url) as connection:
         ensure_schema(connection)
-        connection.execute("TRUNCATE financial, company")
+        connection.execute("TRUNCATE financial, company, business_chunk")
         connection.commit()
         yield connection
