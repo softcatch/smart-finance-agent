@@ -163,6 +163,35 @@ class ChatPageE2ETest {
     org.junit.jupiter.api.Assertions.assertEquals(0L, balanceOf(recipientToken));
   }
 
+  @Test
+  void 계좌_화면에서_만든_계좌로_채팅_송금이_된다() {
+    String recipientToken = signupAndLogin("박영희");
+    String recipientAccount = openAccount(recipientToken);
+    String senderToken = signupAndLogin("최철수");
+    context.addInitScript("localStorage.setItem('accessToken', '" + senderToken + "')");
+
+    // 계좌 화면에서 개설·충전한다(사람이 하는 순서 그대로)
+    page.navigate("http://localhost:" + port + "/accounts");
+    page.fill("#open-form input[name=password]", ACCOUNT_PASSWORD);
+    page.click("#open-form button");
+    page.fill("#accounts tbody tr input[name=amount]", "50000");
+    page.click("#accounts tbody tr button");
+    assertThat(page.locator("#accounts tbody tr .balance")).hasText("50,000원");
+
+    // 채팅으로 이동해 확인 카드로 송금한다. 비밀번호는 계좌 화면에서 정한 값이다.
+    stubAiWithTransferCard(senderToken, recipientAccount, 10000L);
+    page.click("a[href='/chat']");
+    page.waitForURL("**/chat");
+    page.fill("input[name=message]", "박영희한테 1만원 보내줘");
+    page.click("#chat-form button");
+    page.fill(".transfer-card input[name=password]", ACCOUNT_PASSWORD);
+    page.click(".transfer-card button");
+
+    assertThat(page.locator(".card-result")).containsText("송금 완료");
+    org.junit.jupiter.api.Assertions.assertEquals(40000L, balanceOf(senderToken));
+    org.junit.jupiter.api.Assertions.assertEquals(10000L, balanceOf(recipientToken));
+  }
+
   // 회원가입·로그인을 API로 하고 액세스 토큰을 돌려준다.
   private String signupAndLogin(String name) {
     String loginId = "e2e" + System.nanoTime();
