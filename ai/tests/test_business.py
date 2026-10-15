@@ -245,5 +245,5 @@ def test_공시_블록을_시스템_프롬프트로_넘기고_근거를_함께_�
     assert reply == "요약입니다"
     assert "TV와 반도체를 만듭니다." in seen[0][0].content  # 시스템 프롬프트 안
     assert seen[0][-1] is question
-    assert "TV와 반도체를 만듭니다." in evidence  # 근거 = 공시 블록 + 대화
-    assert "삼성전자 사업 내용" in evidence
+    assert evidence == disclosure_blocks(FOUND, {"005930": [_chunk()]})  # 근거 = 공시 블록뿐
+    assert "삼성전자 사업 내용" not in evidence  # 질문은 근거가 아니다

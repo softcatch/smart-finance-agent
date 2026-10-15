@@ -110,10 +110,6 @@ def test_날짜가_아닌_소수는_값으로_대조한다():
     assert unverified_numbers("1,471.5 백만달러", "수주 1,471 5") == ["1471.5"]
 
 
-def test_질문과_대화에_나온_숫자도_근거다():
-    assert unverified_numbers("2026년 반기 기준입니다", "삼성전자 2026년 반기 수주잔고") == []
-
-
 def test_숫자가_없으면_통과하고_같은_숫자는_한_번만_돌려준다():
     assert unverified_numbers("자세한 내용은 공시를 확인하세요", "본문 100") == []
     assert unverified_numbers("77, 77, 77", "본문 100") == ["77"]

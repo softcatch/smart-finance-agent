@@ -971,16 +971,17 @@ def test_답변_숫자가_근거에_없으면_고정_문장과_출처만_나가�
     assert all("1,500" not in m for m in seen[1])  # 믿을 수 없는 숫자가 다음 턴에 가지 않는다
 
 
-def test_질문에_나온_숫자는_근거로_본다():
-    llm, _ = _says("2026년 기준 수주잔고는 1,000억원입니다.")
+def test_질문에만_있는_숫자는_근거가_아니다():
+    # 사용자가 공시에 없는 숫자를 넣어 "맞아?"라고 물어도, 모델이 그대로 확인해 주면 막아야 한다
+    llm, _ = _says("네, 수주잔고는 999,999억원입니다.")
     graph = build_graph(llm, _business("삼성전자"))
 
     out = graph.invoke(
-        {"message": "삼성전자 2026년 수주잔고"},
+        {"message": "삼성전자 수주잔고가 999999억원 맞아?"},
         _cfg("th_1", search_business=_chunks_with("수주잔고 1,000억원")),
     )
 
-    assert out["guard"] == "PASS"
+    assert out["guard"] == "NUMBER_UNVERIFIED"
 
 
 def test_일반_답변은_숫자를_대조하지_않는다():

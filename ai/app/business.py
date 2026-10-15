@@ -207,10 +207,11 @@ def source_lines(found: list[tuple[str, str]], chunks: dict[str, list[dict]]) ->
 
 
 # 검색된 조각만 근거로 질문에 답한다. messages는 대화 기록(마지막이 이번 질문).
-# → (LLM 답변, 근거 텍스트). 근거는 LLM에 보여 준 공시 블록과 대화 내용이다(숫자 대조의 기준).
+# → (LLM 답변, 근거 텍스트). 근거는 LLM에 보여 준 공시 블록뿐이다(숫자 대조의 기준).
+# 사용자가 질문에 쓴 숫자나 이전 답변은 근거가 아니다 — 그걸 근거로 치면 "999999억 맞아?"에 "네"가 통과한다.
 def answer_business(
     llm, messages: list, found: list[tuple[str, str]], chunks: dict
 ) -> tuple[str, str]:
     data = disclosure_blocks(found, chunks)
     ai = llm.invoke([SystemMessage(BUSINESS_PROMPT.format(data=data)), *messages])
-    return ai.content, "\n".join([data, *(m.content for m in messages)])
+    return ai.content, data
