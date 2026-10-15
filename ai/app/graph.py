@@ -7,7 +7,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 
-from app.business import ASK_BUSINESS_COMPANY, BUSINESS_PROMPT, disclosure_blocks, source_lines
+from app.business import ASK_BUSINESS_COMPANY, answer_business, source_lines
 from app.financial import ASK_COMPANY, build_table
 from app.guard import CANARY, check_output, is_injection, mask_pii
 from app.history import ASK_PERIOD, history_reply, period_range, today_kst
@@ -201,12 +201,11 @@ def build_graph(llm: BaseChatModel, extractor=None):
                 "reply": f"수집 대상에서 찾지 못한 기업입니다: {', '.join(missing)}. "
                 "정식 기업명으로 다시 말씀해 주세요."
             }
-        prompt = BUSINESS_PROMPT.format(data=disclosure_blocks(found, chunks))
-        ai = llm.invoke([SystemMessage(prompt), *state["messages"]])
+        reply, _ = answer_business(llm, state["messages"], found, chunks)
         footer = source_lines(found, chunks)
         if skipped := [*missing, *empty]:
             footer += f"\n답변하지 못한 기업: {', '.join(skipped)}"
-        return {"reply": ai.content, "footer": footer}
+        return {"reply": reply, "footer": footer}
 
     # LLM이 쓴 답변은 여기를 거쳐야 나간다. 걸리면 고정 문장으로 바꾸고, 기록에도 바뀐 문장만 남긴다.
     # footer(출처 등 코드가 만든 줄)는 통과했을 때만 붙인다.

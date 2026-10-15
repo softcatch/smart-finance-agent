@@ -59,3 +59,30 @@ def check_output(reply: str) -> str:
     if any(phrase in reply for phrase in _ADVICE):
         return "ADVICE"
     return "PASS"
+
+
+# 숫자 존재 대조(NFR-016 2단계): 답변의 숫자 중 근거 텍스트에 없는 것을 돌려준다.
+# 천 단위 쉼표와 소수 끝의 0, 앞자리 0은 같은 값으로 본다. 날짜(2026.06.30, 2026. 1. 1)는
+# 년·월·일 정수로 쪼개 대조하고, 공시의 두 자리 연도('26)는 2026으로 본다. 단위·표기만 다른
+# 같은 값(131조 ↔ 131,895,033백만원)은 걸린다 — 표기 정규화는 4단계(추후).
+_NUMBER = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?")
+_DATE = re.compile(r"(?:19|20)\d{2}\.\s?\d{1,2}(?:\.\s?\d{1,2})?")
+_YEAR2 = re.compile(r"'(\d{2})(?!\d)")
+
+
+def _canon(token: str) -> str:
+    whole, _, frac = token.replace(",", "").partition(".")
+    frac = frac.rstrip("0")
+    return f"{int(whole)}.{frac}" if frac else str(int(whole))
+
+
+def _numbers(text: str) -> list[str]:
+    found = [str(int(part)) for date in _DATE.findall(text) for part in re.split(r"\.\s?", date)]
+    found += [str(int(f"20{yy}")) for yy in _YEAR2.findall(text)]
+    found += [_canon(token) for token in _NUMBER.findall(_DATE.sub(" ", text))]
+    return found
+
+
+def unverified_numbers(reply: str, evidence: str) -> list[str]:
+    known = set(_numbers(evidence))
+    return [n for n in dict.fromkeys(_numbers(reply)) if n not in known]

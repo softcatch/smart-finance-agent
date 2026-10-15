@@ -1,6 +1,7 @@
 import re
 from html.parser import HTMLParser
 
+from langchain_core.messages import SystemMessage
 from langchain_openai import OpenAIEmbeddings
 
 from app.guard import CANARY
@@ -203,3 +204,13 @@ def source_lines(found: list[tuple[str, str]], chunks: dict[str, list[dict]]) ->
             f"- {name} {first['report_nm']} II. 사업의 내용 (접수번호 {first['rcept_no']}){detail}"
         )
     return "출처\n" + "\n".join(lines)
+
+
+# 검색된 조각만 근거로 질문에 답한다. messages는 대화 기록(마지막이 이번 질문).
+# → (LLM 답변, 근거 텍스트). 근거는 LLM에 보여 준 공시 블록과 대화 내용이다(숫자 대조의 기준).
+def answer_business(
+    llm, messages: list, found: list[tuple[str, str]], chunks: dict
+) -> tuple[str, str]:
+    data = disclosure_blocks(found, chunks)
+    ai = llm.invoke([SystemMessage(BUSINESS_PROMPT.format(data=data)), *messages])
+    return ai.content, "\n".join([data, *(m.content for m in messages)])

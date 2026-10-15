@@ -1,5 +1,9 @@
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.runnables import RunnableLambda
+
 from app.business import (
     MAX_CHARS,
+    answer_business,
     chunk_lines,
     disclosure_blocks,
     extract_business,
@@ -224,3 +228,22 @@ def test_소제목이_모두_없으면_출처에_소제목_자리를_쓰지_않�
     out = source_lines(FOUND, {"005930": [_chunk(section="")]})
 
     assert out.endswith("(접수번호 20260814003699)")
+
+
+def test_공시_블록을_시스템_프롬프트로_넘기고_근거를_함께_돌려준다():
+    seen = []
+
+    def fake(messages):
+        seen.append(messages)
+        return AIMessage("요약입니다")
+
+    question = HumanMessage("삼성전자 사업 내용")
+    reply, evidence = answer_business(
+        RunnableLambda(fake), [question], FOUND, {"005930": [_chunk()]}
+    )
+
+    assert reply == "요약입니다"
+    assert "TV와 반도체를 만듭니다." in seen[0][0].content  # 시스템 프롬프트 안
+    assert seen[0][-1] is question
+    assert "TV와 반도체를 만듭니다." in evidence  # 근거 = 공시 블록 + 대화
+    assert "삼성전자 사업 내용" in evidence
