@@ -1,6 +1,7 @@
 # 재무 비교 표를 만든다. 기간 선택·기준 선택·증감·영업이익률은 모두 여기서(코드가) 계산한다 — LLM은 숫자를 만들지 않는다.
-LABELS = {"11013": "1분기", "11012": "2분기", "11014": "3분기", "11011": "연간"}
+LABELS = {"11013": "1분기", "11012": "2분기", "11014": "3분기", "11011": "연간", "Q4": "4분기"}
 ORDER = {"11013": 1, "11012": 2, "11014": 3, "11011": 4}  # 한 해 안의 보고서 순서
+QUARTERLY = ("11013", "11012", "11014")  # 1·2·3분기 보고서. 사업보고서(연간)에서 빼 4분기를 구한다
 BASIS = {"CFS": "연결", "OFS": "별도"}
 ACCOUNTS = ("매출액", "영업이익", "당기순이익")
 ASK_COMPANY = "어느 기업을 볼까요? 기업 이름을 알려 주세요. 예: 삼성전자와 SK하이닉스 비교해 줘"
@@ -46,6 +47,30 @@ def _margin_cell(rec: dict[str, dict]) -> str:
     return f"{now:.1f}% ({now - before:+.1f}%p)" if before is not None else f"{now:.1f}%"
 
 
+# 사업보고서의 amount는 연간이다. 분기 비교(명세 "최근 분기")를 위해 같은 해 1·2·3분기 단독 값을 빼
+# 4분기 단독 값으로 바꾼다. 전년 4분기도 같은 방식(prev_amount)이다. 하나라도 없으면 계산하지 않는다(None).
+def _fourth_quarter(rows: list[dict], year: int) -> list[dict]:
+    result = []
+    for annual in (r for r in rows if r["bsns_year"] == year and r["reprt_code"] == "11011"):
+        parts = [
+            r
+            for r in rows
+            if r["bsns_year"] == year
+            and r["reprt_code"] in QUARTERLY
+            and r["fs_div"] == annual["fs_div"]
+            and r["account_nm"] == annual["account_nm"]
+        ]
+
+        def minus(field: str, parts=parts, annual=annual) -> int | None:
+            values = [p[field] for p in parts]
+            if len(parts) < len(QUARTERLY) or annual[field] is None or None in values:
+                return None
+            return annual[field] - sum(values)
+
+        result.append({**annual, "amount": minus("amount"), "prev_amount": minus("prev_amount")})
+    return result
+
+
 # companies: [(종목코드, 이름)] 요청 순서. rows_by_stock: 종목코드 → financial 행 목록.
 # 데이터가 하나도 없으면 None. 아니면 E-11의 table({columns, rows, note})을 돌려준다.
 def build_table(
@@ -66,6 +91,9 @@ def build_table(
         for stock, _ in companies
         if latest[stock] == target
     }
+    annual = target[1] == "11011"
+    if annual:
+        at_target = {stock: _fourth_quarter(rows_by_stock[stock], target[0]) for stock in at_target}
     # 모두 연결 재무제표가 있으면 연결, 하나라도 없으면 전부 별도로 맞춘다(명세).
     basis = (
         "CFS" if all(any(r["fs_div"] == "CFS" for r in rs) for rs in at_target.values()) else "OFS"
@@ -92,7 +120,8 @@ def build_table(
         ]
     )
     undisclosed = [name for stock, name in companies if stock not in values]
-    note = f"{period_label(*target)} · {BASIS[basis]} 기준 · 괄호 안은 전년 동기 대비"
+    label = f"{target[0]}년 4분기(연간 − 1~3분기)" if annual else period_label(*target)
+    note = f"{label} · {BASIS[basis]} 기준 · 괄호 안은 전년 동기 대비"
     if undisclosed:
         note += f" · {', '.join(undisclosed)} 미공시"
     return {"columns": ["항목", *(name for _, name in companies)], "rows": rows, "note": note}
