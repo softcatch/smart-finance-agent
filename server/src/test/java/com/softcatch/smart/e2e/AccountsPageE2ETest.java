@@ -3,6 +3,7 @@ package com.softcatch.smart.e2e;
 import static com.microsoft.playwright.assertions.PlaywrightAssertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.microsoft.playwright.Locator;
 import com.softcatch.smart.TestcontainersConfiguration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -31,6 +32,23 @@ class AccountsPageE2ETest extends E2ETestBase {
     page.click("#accounts tbody tr button");
 
     assertThat(page.locator("#accounts tbody tr .balance")).hasText("30,000원");
+  }
+
+  @Test
+  void 두_번째_계좌를_대표로_지정하면_대표_표시가_옮겨_간다() {
+    signIn(signupAndLogin("대표변경"));
+    page.navigate(url("/accounts"));
+    openAccountOnPage();
+    assertThat(page.locator("#accounts tbody tr")).hasCount(1);
+    openAccountOnPage();
+    Locator rows = page.locator("#accounts tbody tr");
+    assertThat(rows).hasCount(2);
+    assertThat(rows.nth(0).locator(".primary")).hasText("대표"); // 첫 계좌가 대표
+
+    rows.nth(1).locator(".make-primary").click();
+
+    assertThat(rows.nth(1).locator(".primary")).hasText("대표");
+    assertThat(rows.nth(0).locator(".primary .make-primary")).hasCount(1); // 첫 계좌는 이제 지정 가능
   }
 
   @Test
@@ -63,5 +81,10 @@ class AccountsPageE2ETest extends E2ETestBase {
     page.navigate(url("/accounts"));
 
     page.waitForURL("**/login");
+  }
+
+  private void openAccountOnPage() {
+    page.fill("#open-form input[name=password]", ACCOUNT_PASSWORD);
+    page.click("#open-form button");
   }
 }

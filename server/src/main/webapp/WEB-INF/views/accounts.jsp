@@ -52,7 +52,29 @@ function row(account) {
   balance.className = 'balance';
   balance.textContent = won(account.balance);
   const primary = document.createElement('td');
-  primary.textContent = account.primary ? '대표' : '';
+  primary.className = 'primary';
+  if (account.primary) {
+    primary.textContent = '대표';
+  } else {
+    // 대표 계좌는 채팅 송금의 출금 계좌다. 처리 중에는 버튼을 막아 한 번만 보낸다.
+    const make = document.createElement('button');
+    make.className = 'make-primary';
+    make.textContent = '대표로 지정';
+    make.addEventListener('click', async () => {
+      make.disabled = true;
+      msg.textContent = '';
+      try {
+        const body = await call('PATCH', '/api/v1/accounts/' + account.accountId + '/primary', {});
+        if (body.success) load();
+        else msg.textContent = body.error.message;
+      } catch (err) {
+        msg.textContent = '서버에 연결할 수 없습니다.';
+      } finally {
+        make.disabled = false;
+      }
+    });
+    primary.appendChild(make);
+  }
 
   const amount = document.createElement('input');
   amount.type = 'number';
