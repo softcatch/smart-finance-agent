@@ -34,7 +34,7 @@ SSH로 홈서버에 접속해 `docker pull` 후 `docker compose up -d`로 다시
 
 | 종류 | 이름 | 값 |
 |---|---|---|
-| Variable | `DOCKERHUB_USERNAME` | Docker Hub 아이디 |
+| Secret | `DOCKERHUB_USERNAME` | Docker Hub 아이디(이메일 아님). Variables에 넣어도 된다 |
 | Secret | `DOCKERHUB_TOKEN` | Docker Hub → Account settings → Personal access tokens에서 만든 토큰(권한 Read & Write) |
 | Secret | `SSH_HOST` | 인터넷에서 홈서버에 닿는 주소(공인 IP나 DDNS 도메인). 집 안 사설 IP는 GitHub 러너가 닿지 못한다 |
 | Secret | `SSH_PORT` | `2222` |

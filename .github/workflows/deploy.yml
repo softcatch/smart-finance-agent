@@ -20,8 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      SERVER_IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/smart-finance-agent-server
-      AI_IMAGE: ${{ vars.DOCKERHUB_USERNAME }}/smart-finance-agent-ai
+      # Docker Hub 아이디는 Secrets에 넣어도 되고 Variables에 넣어도 된다(Secrets 우선).
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME || vars.DOCKERHUB_USERNAME }}
     steps:
       - uses: actions/checkout@v7
 
@@ -29,7 +29,6 @@ jobs:
       # 서버 호스트 키는 Secrets에 고정한 값만 믿는다(접속해서 받아오지 않는다).
       - name: 서버 접속 준비
         env:
-          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PORT: ${{ secrets.SSH_PORT }}
@@ -72,7 +71,7 @@ jobs:
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
+          username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: server 이미지
@@ -83,8 +82,8 @@ jobs:
           provenance: false
           push: true
           tags: |
-            ${{ env.SERVER_IMAGE }}:latest
-            ${{ env.SERVER_IMAGE }}:${{ steps.tag.outputs.value }}
+            ${{ env.DOCKERHUB_USERNAME }}/smart-finance-agent-server:latest
+            ${{ env.DOCKERHUB_USERNAME }}/smart-finance-agent-server:${{ steps.tag.outputs.value }}
           cache-from: type=gha,scope=server
           cache-to: type=gha,scope=server,mode=max
 
@@ -97,15 +96,14 @@ jobs:
           provenance: false
           push: true
           tags: |
-            ${{ env.AI_IMAGE }}:latest
-            ${{ env.AI_IMAGE }}:${{ steps.tag.outputs.value }}
+            ${{ env.DOCKERHUB_USERNAME }}/smart-finance-agent-ai:latest
+            ${{ env.DOCKERHUB_USERNAME }}/smart-finance-agent-ai:${{ steps.tag.outputs.value }}
           cache-from: type=gha,scope=ai
           cache-to: type=gha,scope=ai,mode=max
 
       # compose.yaml은 매번 서버에 맞춰 둔다. .env(비밀값)는 서버에만 있다.
       - name: 홈서버에 배포
         env:
-          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
           IMAGE_TAG: ${{ steps.tag.outputs.value }}
         run: |
           ssh homeserver 'mkdir -p ~/smart-finance-agent'
