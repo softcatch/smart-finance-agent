@@ -9,6 +9,7 @@ import com.softcatch.smart.alias.dto.request.AliasRequest;
 import com.softcatch.smart.auth.dto.request.LoginRequest;
 import com.softcatch.smart.auth.dto.request.SignupRequest;
 import com.softcatch.smart.common.ApiException;
+import com.softcatch.smart.transfer.dto.request.TransferConfirmRequest;
 import com.softcatch.smart.transfer.dto.request.TransferCreateRequest;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -27,6 +28,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
@@ -165,7 +167,9 @@ class TransferControllerTest {
     mockMvc
         .perform(
             MockMvcRequestBuilders.post("/api/v1/transfer-requests/{id}/confirm", requestId)
-                .header("Authorization", "Bearer " + sender.token()))
+                .header("Authorization", "Bearer " + sender.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new TransferConfirmRequest(ACCOUNT_PASSWORD))))
         .andExpect(MockMvcResultMatchers.status().isOk())
         .andExpect(MockMvcResultMatchers.jsonPath("$.data.amount").value(10000))
         .andExpect(MockMvcResultMatchers.jsonPath("$.data.balanceAfter").value(40000))
@@ -202,7 +206,9 @@ class TransferControllerTest {
     mockMvc
         .perform(
             MockMvcRequestBuilders.post("/api/v1/transfer-requests/{id}/confirm", requestId)
-                .header("Authorization", "Bearer " + sender.token()))
+                .header("Authorization", "Bearer " + sender.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new TransferConfirmRequest(ACCOUNT_PASSWORD))))
         .andExpect(MockMvcResultMatchers.status().isConflict())
         .andExpect(
             MockMvcResultMatchers.jsonPath("$.error.code").value("TRANSFER_REQUEST_ALREADY_USED"));
@@ -231,7 +237,9 @@ class TransferControllerTest {
         .perform(
             MockMvcRequestBuilders.post(
                     "/api/v1/transfer-requests/{id}/confirm", expired.getRequestId())
-                .header("Authorization", "Bearer " + sender.token()))
+                .header("Authorization", "Bearer " + sender.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new TransferConfirmRequest(ACCOUNT_PASSWORD))))
         .andExpect(MockMvcResultMatchers.status().isGone())
         .andExpect(
             MockMvcResultMatchers.jsonPath("$.error.code").value("TRANSFER_REQUEST_EXPIRED"));
@@ -245,7 +253,9 @@ class TransferControllerTest {
     mockMvc
         .perform(
             MockMvcRequestBuilders.post("/api/v1/transfer-requests/{id}/confirm", "tr_없는요청")
-                .header("Authorization", "Bearer " + sender.token()))
+                .header("Authorization", "Bearer " + sender.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new TransferConfirmRequest(ACCOUNT_PASSWORD))))
         .andExpect(MockMvcResultMatchers.status().isNotFound())
         .andExpect(
             MockMvcResultMatchers.jsonPath("$.error.code").value("TRANSFER_REQUEST_NOT_FOUND"));
@@ -266,7 +276,9 @@ class TransferControllerTest {
     mockMvc
         .perform(
             MockMvcRequestBuilders.post("/api/v1/transfer-requests/{id}/confirm", requestId)
-                .header("Authorization", "Bearer " + stranger.token()))
+                .header("Authorization", "Bearer " + stranger.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new TransferConfirmRequest(ACCOUNT_PASSWORD))))
         .andExpect(MockMvcResultMatchers.status().isNotFound())
         .andExpect(
             MockMvcResultMatchers.jsonPath("$.error.code").value("TRANSFER_REQUEST_NOT_FOUND"));
@@ -301,7 +313,9 @@ class TransferControllerTest {
         .perform(
             MockMvcRequestBuilders.post(
                     "/api/v1/transfer-requests/{id}/confirm", inconsistent.getRequestId())
-                .header("Authorization", "Bearer " + sender.token()))
+                .header("Authorization", "Bearer " + sender.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new TransferConfirmRequest(ACCOUNT_PASSWORD))))
         .andExpect(MockMvcResultMatchers.status().isForbidden())
         .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("ACCOUNT_NOT_OWNED"));
   }
@@ -320,9 +334,34 @@ class TransferControllerTest {
     mockMvc
         .perform(
             MockMvcRequestBuilders.post("/api/v1/transfer-requests/{id}/confirm", requestId)
-                .header("Authorization", "Bearer " + sender.token()))
+                .header("Authorization", "Bearer " + sender.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new TransferConfirmRequest(ACCOUNT_PASSWORD))))
         .andExpect(MockMvcResultMatchers.status().isConflict())
         .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("INSUFFICIENT_BALANCE"));
+  }
+
+  @Test
+  void 확정_비밀번호가_틀리면_403이고_송금되지_않는다() throws Exception {
+    MemberSession recipient = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "수취인9");
+    AccountInfo recipientAccount = openAccount(recipient.token());
+
+    MemberSession sender = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "발신자12");
+    AccountInfo senderAccount = openAccount(sender.token());
+    charge(sender.token(), senderAccount.accountId(), 50000L);
+    String requestId =
+        createTransferRequest(sender.token(), recipientAccount.accountNumber(), null, 10000L);
+
+    confirm(sender.token(), requestId, "0000")
+        .andExpect(MockMvcResultMatchers.status().isForbidden())
+        .andExpect(
+            MockMvcResultMatchers.jsonPath("$.error.code").value("ACCOUNT_PASSWORD_INVALID"));
+
+    Account senderAcc = accounts.findByAccountNumber(senderAccount.accountNumber()).orElseThrow();
+    Account recipientAcc =
+        accounts.findByAccountNumber(recipientAccount.accountNumber()).orElseThrow();
+    Assertions.assertEquals(50000L, senderAcc.getBalance());
+    Assertions.assertEquals(0L, recipientAcc.getBalance());
   }
 
   @Test
@@ -342,7 +381,7 @@ class TransferControllerTest {
         () -> {
           barrier.await();
           try {
-            transferService.confirm(sender.memberId(), requestId);
+            transferService.confirm(sender.memberId(), requestId, ACCOUNT_PASSWORD);
             return true;
           } catch (ApiException e) {
             return false;
@@ -387,7 +426,7 @@ class TransferControllerTest {
               () -> {
                 barrier.await();
                 try {
-                  transferService.confirm(sender.memberId(), requestId);
+                  transferService.confirm(sender.memberId(), requestId, ACCOUNT_PASSWORD);
                   return true;
                 } catch (ApiException e) {
                   return false;
@@ -430,13 +469,13 @@ class TransferControllerTest {
     Callable<Boolean> confirmAtoB =
         () -> {
           barrier.await();
-          transferService.confirm(memberA.memberId(), requestAtoB);
+          transferService.confirm(memberA.memberId(), requestAtoB, ACCOUNT_PASSWORD);
           return true;
         };
     Callable<Boolean> confirmBtoA =
         () -> {
           barrier.await();
-          transferService.confirm(memberB.memberId(), requestBtoA);
+          transferService.confirm(memberB.memberId(), requestBtoA, ACCOUNT_PASSWORD);
           return true;
         };
 
@@ -608,11 +647,21 @@ class TransferControllerTest {
     return json.readTree(body).at("/data/requestId").asText();
   }
 
+  private ResultActions confirm(String token, String requestId, String password) throws Exception {
+    return mockMvc.perform(
+        MockMvcRequestBuilders.post("/api/v1/transfer-requests/{id}/confirm", requestId)
+            .header("Authorization", "Bearer " + token)
+            .contentType(MediaType.APPLICATION_JSON)
+            .content(json.writeValueAsString(new TransferConfirmRequest(password))));
+  }
+
   private void confirmTransfer(String token, String requestId) throws Exception {
     mockMvc
         .perform(
             MockMvcRequestBuilders.post("/api/v1/transfer-requests/{id}/confirm", requestId)
-                .header("Authorization", "Bearer " + token))
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new TransferConfirmRequest(ACCOUNT_PASSWORD))))
         .andExpect(MockMvcResultMatchers.status().isOk());
   }
 

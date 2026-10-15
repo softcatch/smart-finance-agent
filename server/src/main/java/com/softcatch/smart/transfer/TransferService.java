@@ -16,6 +16,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -30,18 +31,21 @@ class TransferService {
   private final AccountRepository accounts;
   private final AliasRepository aliases;
   private final MemberRepository members;
+  private final PasswordEncoder passwordEncoder;
 
   TransferService(
       TransferRequestRepository transferRequests,
       TransferRepository transfers,
       AccountRepository accounts,
       AliasRepository aliases,
-      MemberRepository members) {
+      MemberRepository members,
+      PasswordEncoder passwordEncoder) {
     this.transferRequests = transferRequests;
     this.transfers = transfers;
     this.accounts = accounts;
     this.aliases = aliases;
     this.members = members;
+    this.passwordEncoder = passwordEncoder;
   }
 
   @Transactional
@@ -96,7 +100,7 @@ class TransferService {
   }
 
   @Transactional
-  TransferConfirmResponse confirm(Long callerMemberId, String requestId) {
+  TransferConfirmResponse confirm(Long callerMemberId, String requestId, String password) {
     TransferRequest request =
         transferRequests
             .findByRequestId(requestId)
@@ -115,6 +119,11 @@ class TransferService {
         accounts.findByAccountNumber(request.getFromAccountNumber()).orElseThrow();
     if (!fromAccount.getMemberId().equals(callerMemberId)) {
       throw new ApiException(ErrorCode.ACCOUNT_NOT_OWNED);
+    }
+
+    // 출금 계좌의 비밀번호를 확인한다. null은 빈 문자열로 보아 불일치로 처리한다.
+    if (!passwordEncoder.matches(password == null ? "" : password, fromAccount.getPasswordHash())) {
+      throw new ApiException(ErrorCode.ACCOUNT_PASSWORD_INVALID);
     }
 
     Account toAccount =
