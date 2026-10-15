@@ -44,13 +44,15 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       SMART_SERVER_BASE_URL: http://server:8080
 
-  # DART 재무 수집 스케줄러(하루 1회). API 서버와 같은 이미지에 명령만 다르다.
-  # 재무 테이블은 이 컨테이너가 DB에 직접 쓴다(FastAPI 소유). DART_API_KEY가 없으면 안내만 하고 다음 주기를 기다린다.
+  # DART 수집 스케줄러(하루 1회): 재무 숫자, 사업의 내용(원문 → 청크 → 임베딩 → pgvector).
+  # API 서버와 같은 이미지에 명령만 다르다. 테이블은 이 컨테이너가 DB에 직접 쓴다(FastAPI 소유).
+  # DART_API_KEY가 없으면 안내만 하고 다음 주기를 기다린다. OPENAI_API_KEY가 없으면 사업의 내용만 건너뛴다.
   collector:
     build: ./ai
     command: ["sh", "-c", "while true; do uv run --no-sync python -m app.collect; sleep 86400; done"]
     environment:
       DART_API_KEY: ${DART_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       POSTGRES_HOST: db
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
