@@ -3,11 +3,13 @@ package com.softcatch.smart.e2e;
 import static com.microsoft.playwright.assertions.PlaywrightAssertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.options.BoundingBox;
 import com.softcatch.smart.TestcontainersConfiguration;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -100,6 +102,43 @@ class ChatPageE2ETest extends E2ETestBase {
 
     assertThat(page.locator(".card-result")).containsText("송금 완료");
     assertThat(page.locator(".transfer-card button")).isDisabled();
+  }
+
+  @Test
+  void 로그아웃하면_토큰과_대화가_지워지고_로그인_화면으로_이동한다() {
+    String token = signupAndLogin("로그아웃유저");
+    page.navigate(url("/login"));
+    assertThat(page.locator("#logout")).isHidden(); // 로그인 전에는 보이지 않는다
+    page.evaluate("t => localStorage.setItem('accessToken', t)", token);
+    page.navigate(url("/chat"));
+    page.fill("input[name=message]", "안녕");
+    page.click("#chat-form button");
+    assertThat(page.locator(".msg-ai .bubble")).hasText("안녕하세요");
+
+    page.click("#logout");
+
+    page.waitForURL("**/login");
+    assertNull(page.evaluate("localStorage.getItem('accessToken')"));
+    assertNull(page.evaluate("sessionStorage.getItem('chat')"));
+  }
+
+  @Test
+  void 로그인하면_이전_대화_기록이_지워진다() {
+    String loginId = "chat" + System.nanoTime();
+    post(
+        "/api/v1/auth/signup",
+        null,
+        Map.of("loginId", loginId, "password", "pw12345!", "name", "로그인유저"));
+    page.navigate(url("/login"));
+    page.evaluate("sessionStorage.setItem('chat', '{\"threadId\":\"th_old\",\"items\":[]}')");
+
+    page.fill("input[name=loginId]", loginId);
+    page.fill("input[name=password]", "pw12345!");
+    page.click("#login-form button");
+
+    assertThat(page.locator("#msg")).hasText("로그인 성공");
+    assertNull(page.evaluate("sessionStorage.getItem('chat')"));
+    assertThat(page.locator("#logout")).isVisible();
   }
 
   @Test

@@ -31,6 +31,8 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   const body = await res.json();
   if (body.success) {
     localStorage.setItem('accessToken', body.data.accessToken);
+    sessionStorage.removeItem('chat'); // 다른 계정의 대화가 이어지지 않게 한다
+    document.getElementById('logout').hidden = false;
     document.getElementById('msg').textContent = '로그인 성공';
   } else {
     document.getElementById('msg').textContent = body.error.message;

@@ -290,3 +290,12 @@ body.chat h1 {
   background: #fff;
   color: var(--navy);
 }
+
+/* 로그아웃은 메뉴 줄 오른쪽 끝 */
+header button {
+  height: 36px;
+  margin-left: auto;
+  padding: 0 16px;
+  background: #fff;
+  color: var(--navy);
+}
