@@ -10,7 +10,10 @@
 <body class="chat">
 <%@ include file="nav.jspf" %>
 <main>
-<h1>채팅</h1>
+<div class="chat-head">
+  <h1>채팅</h1>
+  <button id="new-chat" type="button">새 대화</button>
+</div>
 <div id="log"></div>
 <p id="msg"></p>
 <form id="chat-form">
@@ -23,6 +26,20 @@ const token = localStorage.getItem('accessToken');
 const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
 const log = document.getElementById('log');
 const msg = document.getElementById('msg');
+
+// 대화는 이 탭의 sessionStorage에 둔다 — 메뉴를 다녀와도 같은 대화를 잇고, 탭을 닫거나 로그아웃하면 사라진다.
+// items: [{ who, text, card?, table?, result?, done? }] — result·done은 확인 카드의 결과 표시다.
+let state = JSON.parse(sessionStorage.getItem('chat')) || { threadId: null, items: [] };
+
+function save() {
+  sessionStorage.setItem('chat', JSON.stringify(state));
+}
+
+function push(item) {
+  state.items.push(item);
+  save();
+  render(item);
+}
 
 // 서버 응답({success, data, error})을 돌려준다. 401이면 로그인 페이지로 보낸다.
 async function call(path, body) {
@@ -48,7 +65,7 @@ function render(item) {
   bubble.className = 'bubble';
   bubble.textContent = item.text;
   row.appendChild(bubble);
-  if (item.card) addCard(row, item.card);
+  if (item.card) addCard(row, item);
   if (item.table) addTable(row, item.table);
   log.appendChild(row);
   log.scrollTop = log.scrollHeight;
@@ -56,7 +73,9 @@ function render(item) {
 
 // 송금 확인 카드(FR-009). [보내기]는 AI 경로를 거치지 않고 화면이 Spring에 직접 확정한다.
 // 요청ID는 1회용이다 — 성공하거나 비밀번호가 틀리면(폐기됨) 다시 누를 수 없게 막는다.
-function addCard(row, card) {
+// 결과는 item에 남겨 두어, 메뉴를 다녀온 뒤에도 끝난 카드가 다시 눌리지 않는다. 비밀번호는 저장하지 않는다.
+function addCard(row, item) {
+  const card = item.card;
   const box = document.createElement('div');
   box.className = 'transfer-card';
 
@@ -72,9 +91,11 @@ function addCard(row, card) {
 
   const button = document.createElement('button');
   button.textContent = '보내기';
+  button.disabled = !!item.done;
 
   const result = document.createElement('p');
   result.className = 'card-result';
+  result.textContent = item.result || '';
 
   button.addEventListener('click', async () => {
     button.disabled = true;
@@ -82,20 +103,24 @@ function addCard(row, card) {
       const body = await call('/api/v1/transfer-requests/' + card.requestId + '/confirm',
         { password: password.value });
       if (body.success) {
-        result.textContent = '송금 완료: ' + body.data.recipientName + '님께 '
+        item.result = '송금 완료: ' + body.data.recipientName + '님께 '
           + body.data.amount.toLocaleString('ko-KR') + '원, 잔액 '
           + body.data.balanceAfter.toLocaleString('ko-KR') + '원';
+        item.done = true;
       } else if (body.error.code === 'ACCOUNT_PASSWORD_INVALID') {
-        result.textContent = body.error.message
+        item.result = body.error.message
           + ' 이 송금 요청은 취소되었습니다. 채팅으로 다시 요청해 주세요.';
+        item.done = true;
       } else {
-        result.textContent = body.error.message;
+        item.result = body.error.message;
         button.disabled = false;
       }
     } catch (err) {
-      result.textContent = '서버에 연결할 수 없습니다.';
+      item.result = '서버에 연결할 수 없습니다.';
       button.disabled = false;
     }
+    result.textContent = item.result;
+    save();
   });
 
   box.append(info, password, button, result);
@@ -134,10 +159,23 @@ function addTable(row, t) {
   }
 }
 
-// 페이지를 열 때 새 대화를 만든다(FR-013). 전송은 이 약속이 끝난 뒤에 한다.
-const ready = call('/api/v1/chat/threads').then((body) => {
-  if (!body.success) throw new Error(body.error.message);
-  return body.data.threadId;
+// 저장된 대화가 있으면 그 threadId를 잇고, 없으면 새 대화를 만든다(FR-013). 전송은 이 약속이 끝난 뒤에 한다.
+function newThread() {
+  return call('/api/v1/chat/threads').then((body) => {
+    if (!body.success) throw new Error(body.error.message);
+    state.threadId = body.data.threadId;
+    save();
+    return state.threadId;
+  });
+}
+let ready = state.threadId ? Promise.resolve(state.threadId) : newThread();
+state.items.forEach(render);
+
+document.getElementById('new-chat').addEventListener('click', () => {
+  state = { threadId: null, items: [] };
+  log.replaceChildren();
+  msg.textContent = '';
+  ready = newThread();
 });
 
 document.getElementById('chat-form').addEventListener('submit', async (e) => {
@@ -148,12 +186,14 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
   input.value = '';
   button.disabled = true;
   msg.textContent = '';
-  render({ who: 'me', text });
+  const chat = state;
+  push({ who: 'me', text });
   try {
     const threadId = await ready;
     const body = await call('/api/v1/chat/threads/' + threadId + '/messages', { message: text });
+    if (state !== chat) return; // 답을 기다리는 사이 [새 대화]를 눌렀다 — 새 대화에 섞지 않는다
     if (body.success) {
-      render({ who: 'ai', text: body.data.reply, card: body.data.transferCard, table: body.data.table });
+      push({ who: 'ai', text: body.data.reply, card: body.data.transferCard, table: body.data.table });
     } else {
       msg.textContent = body.error.message;
     }

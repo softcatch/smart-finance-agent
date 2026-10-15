@@ -277,3 +277,16 @@ body.chat h1 {
   margin: 0;
   font-size: 12px;
 }
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#new-chat {
+  height: 36px;
+  padding: 0 16px;
+  background: #fff;
+  color: var(--navy);
+}

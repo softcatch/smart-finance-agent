@@ -2,6 +2,7 @@ package com.softcatch.smart.e2e;
 
 import static com.microsoft.playwright.assertions.PlaywrightAssertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.microsoft.playwright.Locator;
@@ -42,6 +43,63 @@ class ChatPageE2ETest extends E2ETestBase {
     BoundingBox me = page.locator(".msg-me .bubble").boundingBox();
     BoundingBox ai = page.locator(".msg-ai .bubble").boundingBox();
     assertTrue(me.x > ai.x, "내 말풍선이 AI 말풍선보다 오른쪽에 있어야 한다");
+  }
+
+  @Test
+  void 다른_메뉴를_다녀와도_대화와_threadId가_이어진다() {
+    signIn(signupAndLogin("이어가기유저"));
+    page.navigate(url("/chat"));
+    page.fill("input[name=message]", "안녕");
+    page.click("#chat-form button");
+    assertThat(page.locator(".msg-ai .bubble")).hasText("안녕하세요");
+    String firstThreadId = json.readTree(FAKE_AI.lastBody).get("threadId").asText();
+
+    openMenuAndBack("/accounts");
+
+    assertThat(page.locator(".msg-me .bubble")).hasText("안녕");
+    assertThat(page.locator(".msg-ai .bubble")).hasText("안녕하세요");
+    page.fill("input[name=message]", "또 안녕");
+    page.click("#chat-form button");
+    assertThat(page.locator(".msg-ai .bubble")).hasCount(2);
+    assertEquals(firstThreadId, json.readTree(FAKE_AI.lastBody).get("threadId").asText());
+  }
+
+  @Test
+  void 새_대화를_누르면_기록이_비워지고_새_threadId를_쓴다() {
+    signIn(signupAndLogin("새대화유저"));
+    page.navigate(url("/chat"));
+    page.fill("input[name=message]", "안녕");
+    page.click("#chat-form button");
+    assertThat(page.locator(".msg-ai .bubble")).hasText("안녕하세요");
+    String firstThreadId = json.readTree(FAKE_AI.lastBody).get("threadId").asText();
+
+    page.click("#new-chat");
+    assertThat(page.locator(".msg")).hasCount(0);
+    page.fill("input[name=message]", "다시 안녕");
+    page.click("#chat-form button");
+
+    assertThat(page.locator(".msg-ai .bubble")).hasText("안녕하세요");
+    assertNotEquals(firstThreadId, json.readTree(FAKE_AI.lastBody).get("threadId").asText());
+  }
+
+  @Test
+  void 송금을_마친_확인_카드는_메뉴를_다녀와도_다시_눌리지_않는다() {
+    String recipientAccount = openAccount(signupAndLogin("이어받는이"));
+    String senderToken = signupAndLogin("이어보내는이");
+    charge(senderToken, openAccount(senderToken), 50000L);
+    stubAiWithTransferCard(senderToken, recipientAccount, 10000L);
+    signIn(senderToken);
+    page.navigate(url("/chat"));
+    page.fill("input[name=message]", "1만원 보내줘");
+    page.click("#chat-form button");
+    page.fill(".transfer-card input[name=password]", ACCOUNT_PASSWORD);
+    page.click(".transfer-card button");
+    assertThat(page.locator(".card-result")).containsText("송금 완료");
+
+    openMenuAndBack("/transfers");
+
+    assertThat(page.locator(".card-result")).containsText("송금 완료");
+    assertThat(page.locator(".transfer-card button")).isDisabled();
   }
 
   @Test
@@ -153,6 +211,14 @@ class ChatPageE2ETest extends E2ETestBase {
     assertThat(page.locator(".card-result")).containsText("송금 완료");
     assertEquals(40000L, balanceOf(senderToken));
     assertEquals(10000L, balanceOf(recipientToken));
+  }
+
+  // 메뉴로 다른 화면에 갔다가 메뉴로 채팅에 돌아온다.
+  private void openMenuAndBack(String otherPath) {
+    page.click("nav a[href='" + otherPath + "']");
+    page.waitForURL("**" + otherPath);
+    page.click("nav a[href='/chat']");
+    page.waitForURL("**/chat");
   }
 
   // 가짜 FastAPI가 확인 카드를 돌려주게 한다. 카드의 요청ID는 Spring이 실제로 발급한 값이다.
