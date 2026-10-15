@@ -11,8 +11,7 @@
 </form>
 <p id="msg"></p>
 <a href="/signup">회원가입</a>
-<a href="/accounts">계좌</a>
-<a href="/chat">채팅</a>
+<%@ include file="nav.jspf" %>
 <script>
 document.getElementById('login-form').addEventListener('submit', async (e) => {
   e.preventDefault();

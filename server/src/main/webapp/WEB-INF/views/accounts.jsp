@@ -3,6 +3,7 @@
 <html lang="ko">
 <head><meta charset="UTF-8"><title>계좌</title></head>
 <body>
+<%@ include file="nav.jspf" %>
 <h1>계좌</h1>
 <table id="accounts">
   <thead><tr><th>계좌번호</th><th>잔액</th><th>대표</th><th>충전</th></tr></thead>
@@ -14,7 +15,6 @@
   <button type="submit">개설</button>
 </form>
 <p id="msg"></p>
-<a href="/chat">채팅</a>
 <script>
 const token = localStorage.getItem('accessToken');
 const tbody = document.querySelector('#accounts tbody');
