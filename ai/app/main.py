@@ -1,9 +1,10 @@
 import os
 from functools import lru_cache, partial
+from time import perf_counter
 from typing import Annotated, Any
 
 import psycopg
-from fastapi import Depends, FastAPI, Header
+from fastapi import BackgroundTasks, Depends, FastAPI, Header
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
@@ -11,7 +12,7 @@ from app.business import embed_texts
 from app.graph import build_graph
 from app.guard import mask_pii
 from app.spring import create_transfer_request, get_transfer_history
-from app.store import find_companies, load_financials, search_business_chunks
+from app.store import find_companies, load_financials, search_business_chunks, write_chat_log
 
 app = FastAPI(title="smart-ai")
 
@@ -70,6 +71,15 @@ def search_business(names: list[str], question: str):
     return companies, missing, chunks
 
 
+# 채팅 한 턴의 판정·노드별 소요 시간을 로그 테이블에 남긴다(NFR-026). 응답 뒤에 쓰고, 실패해도 채팅은 무관하다.
+def log_chat(thread_id: str, guard: str, node_ms: dict[str, int]) -> None:
+    try:
+        with _connect() as conn:
+            write_chat_log(conn, thread_id, guard, node_ms)
+    except psycopg.Error:
+        pass
+
+
 class ChatRequest(BaseModel):
     threadId: str  # 체크포인터의 thread_id — 같은 값이면 같은 대화(FR-015)
     message: str
@@ -78,24 +88,36 @@ class ChatRequest(BaseModel):
 @app.post("/internal/chat")
 def chat(
     req: ChatRequest,
+    background: BackgroundTasks,
     graph: Annotated[Any, Depends(get_graph)],
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict:
     token = (authorization or "").removeprefix("Bearer ")
     # 그래프 입력도 체크포인터에 저장되므로, 원문이 남지 않게 넣기 전에 가린다.
     # JWT는 문자열 값이 아니라 함수에 담아 넘긴다 — 문자열은 체크포인터 메타데이터에 저장된다.
-    out = graph.invoke(
-        {"message": mask_pii(req.message)},
-        {
-            "configurable": {
-                "thread_id": req.threadId,
-                "create_transfer": partial(create_transfer_request, token),
-                "get_history": partial(get_transfer_history, token),
-                "compare_financials": compare_financials,
-                "search_business": search_business,
-            }
-        },
-    )
+    config = {
+        "configurable": {
+            "thread_id": req.threadId,
+            "create_transfer": partial(create_transfer_request, token),
+            "get_history": partial(get_transfer_history, token),
+            "compare_financials": compare_financials,
+            "search_business": search_business,
+        }
+    }
+    # 노드가 끝날 때마다 걸린 시간을 잰다(updates). 마지막 values가 최종 상태다.
+    node_ms: dict[str, int] = {}
+    out: dict = {}
+    last = perf_counter()
+    for mode, chunk in graph.stream(
+        {"message": mask_pii(req.message)}, config, stream_mode=["updates", "values"]
+    ):
+        if mode == "updates":
+            now = perf_counter()
+            node_ms[next(iter(chunk))] = round((now - last) * 1000)
+            last = now
+        else:
+            out = chunk
+    background.add_task(log_chat, req.threadId, out["guard"], node_ms)
     data = {"reply": out["reply"], "guard": out["guard"]}
     if out.get("transfer_card"):  # 확인 카드는 있을 때만(E-11)
         data["transferCard"] = out["transfer_card"]

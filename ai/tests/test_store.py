@@ -10,6 +10,7 @@ from app.store import (
     search_business_chunks,
     upsert_companies,
     upsert_financials,
+    write_chat_log,
 )
 
 
@@ -280,3 +281,20 @@ def test_검색은_그_회사_청크만_본다(conn):
 
 def test_청크가_없는_회사는_빈_목록(conn):
     assert search_business_chunks(conn, "005930", _vec(0)) == []
+
+
+def test_채팅_로그를_남긴다(conn):
+    write_chat_log(conn, "th_1", "PASS", {"extract": 120, "answer": 2500})
+
+    row = conn.execute("SELECT thread_id, guard, node_ms FROM chat_log").fetchone()
+
+    assert row == ("th_1", "PASS", {"extract": 120, "answer": 2500})
+
+
+def test_로그_테이블이_아직_없어도_만들어서_남긴다(conn):
+    conn.execute("DROP TABLE chat_log")
+    conn.commit()
+
+    write_chat_log(conn, "th_1", "ADVICE", {"answer": 10})
+
+    assert conn.execute("SELECT guard FROM chat_log").fetchall() == [("ADVICE",)]

@@ -5,6 +5,7 @@ import pytest
 from langchain_core.runnables import RunnableLambda
 
 from app import main
+from app.main import log_chat as real_log_chat
 from app.store import replace_business_chunks, upsert_companies
 from app.transfer import TransferSlots
 
@@ -96,3 +97,23 @@ def test_찾을_기업이_없으면_질문을_임베딩하지_않는다(conn, da
     monkeypatch.setattr(main, "embed_texts", embed)
 
     assert main.search_business(["삼전"], "사업 내용") == ([], ["삼전"], {})
+
+
+# 개발 DB를 건드리지 않게 conftest가 main.log_chat을 꺼 두므로, 모듈을 불러올 때 잡아 둔 원래 함수를 쓴다.
+def test_채팅_로그는_연결만_바꿔_실제_DB에_남는다(conn, database_url, monkeypatch):
+    monkeypatch.setattr(main, "_connect", lambda: psycopg.connect(database_url))
+
+    real_log_chat("th_9", "NUMBER_UNVERIFIED", {"business": 4100})
+
+    assert conn.execute("SELECT thread_id, guard, node_ms FROM chat_log").fetchall() == [
+        ("th_9", "NUMBER_UNVERIFIED", {"business": 4100})
+    ]
+
+
+def test_로그를_못_써도_예외가_나가지_않는다(monkeypatch):
+    def down():
+        raise psycopg.OperationalError("connection refused")
+
+    monkeypatch.setattr(main, "_connect", down)
+
+    real_log_chat("th_1", "PASS", {})  # 채팅은 로그 때문에 실패하지 않는다

@@ -1,5 +1,6 @@
 import psycopg
 import psycopg.rows
+from psycopg.types.json import Jsonb
 
 # 이 테이블은 FastAPI만 읽고 쓴다(재무 수치는 파이썬 계산 코드 — 개요 3절). Flyway와 엮지 않고 여기서 만든다.
 SCHEMA = """
@@ -38,6 +39,15 @@ CREATE TABLE IF NOT EXISTS business_chunk (
     content     TEXT         NOT NULL,
     embedding   vector(1536) NOT NULL,
     PRIMARY KEY (stock_code, seq)
+);
+
+-- 채팅 한 턴의 판정 코드와 노드별 소요 시간(NFR-026). 메시지 본문은 남기지 않는다.
+CREATE TABLE IF NOT EXISTS chat_log (
+    id          BIGSERIAL    PRIMARY KEY,
+    created_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    thread_id   TEXT         NOT NULL,
+    guard       VARCHAR(20)  NOT NULL,
+    node_ms     JSONB        NOT NULL  -- 노드 이름 → 걸린 시간(ms)
 );
 """
 
@@ -172,3 +182,18 @@ def search_business_chunks(
             (stock_code, str(vector), limit),
         )
         return cur.fetchall()
+
+
+# 채팅 한 턴의 판정과 노드별 소요 시간을 남긴다. 수집기가 스키마를 만들기 전(DART 키 없음)이면 여기서 만든다.
+def write_chat_log(
+    conn: psycopg.Connection, thread_id: str, guard: str, node_ms: dict[str, int]
+) -> None:
+    sql = "INSERT INTO chat_log (thread_id, guard, node_ms) VALUES (%s, %s, %s)"
+    row = (thread_id, guard, Jsonb(node_ms))
+    try:
+        conn.execute(sql, row)
+    except psycopg.errors.UndefinedTable:
+        conn.rollback()
+        ensure_schema(conn)
+        conn.execute(sql, row)
+    conn.commit()
