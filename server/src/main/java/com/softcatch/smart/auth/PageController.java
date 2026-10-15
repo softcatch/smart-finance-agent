@@ -30,4 +30,9 @@ class PageController {
   String transfersPage() {
     return "transfers";
   }
+
+  @GetMapping("/aliases")
+  String aliasesPage() {
+    return "aliases";
+  }
 }
