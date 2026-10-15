@@ -7,6 +7,7 @@ from app.store import (
     find_companies,
     load_financials,
     replace_business_chunks,
+    search_business_chunks,
     upsert_companies,
     upsert_financials,
 )
@@ -240,7 +241,7 @@ def test_넣다가_실패하면_기존_청크가_남는다(conn):
     assert conn.execute("SELECT content FROM business_chunk").fetchall() == [("옛 본문",)]
 
 
-def test_저장한_벡터로_가까운_청크를_찾는다(conn):
+def _three_chunks(conn):
     replace_business_chunks(
         conn,
         "005930",
@@ -251,12 +252,31 @@ def test_저장한_벡터로_가까운_청크를_찾는다(conn):
             ("연구", "R&D 투자", _vec(2)),
         ],
     )
-    query = str(_vec(1, 0.9))  # 두 번째 청크 방향
 
-    rows = conn.execute(
-        "SELECT content FROM business_chunk WHERE stock_code = %s "
-        "ORDER BY embedding <=> %s::vector LIMIT 2",
-        ("005930", query),
-    ).fetchall()
 
-    assert rows[0] == ("수주잔고",)
+def test_질문_벡터와_가까운_청크부터_돌려준다(conn):
+    _three_chunks(conn)
+
+    rows = search_business_chunks(conn, "005930", _vec(1, 0.9), limit=2)
+
+    assert len(rows) == 2
+    assert rows[0] == {
+        "section": "수주",
+        "content": "수주잔고",
+        "report_nm": "반기보고서 (2026.06)",
+        "rcept_no": "20260814003699",
+    }
+
+
+def test_검색은_그_회사_청크만_본다(conn):
+    _three_chunks(conn)
+    replace_business_chunks(conn, "000660", REPORT, [("메모리", "다른 회사 본문", _vec(1))])
+
+    contents = [r["content"] for r in search_business_chunks(conn, "005930", _vec(1))]
+
+    assert contents[0] == "수주잔고"
+    assert "다른 회사 본문" not in contents
+
+
+def test_청크가_없는_회사는_빈_목록(conn):
+    assert search_business_chunks(conn, "005930", _vec(0)) == []
