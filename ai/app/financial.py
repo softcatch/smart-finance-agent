@@ -125,3 +125,62 @@ def build_table(
     if undisclosed:
         note += f" · {', '.join(undisclosed)} 미공시"
     return {"columns": ["항목", *(name for _, name in companies)], "rows": rows, "note": note}
+
+
+# 상세 보기(FR-016)의 전체 표: 기업은 열이고, 최근 분기부터 분기마다 항목 네 줄이다.
+# 값은 build_table과 같은 코드로 계산한다(NFR-002). 분기 값은 분기 보고서의 당기(해당 분기 단독)와 전년 동기이고,
+# 4분기는 연간 − 1~3분기다. 재무제표 기준은 비교 대상 모두 같게 맞춘다(연결 우선, 하나라도 없으면 별도).
+# 데이터가 하나도 없으면 None.
+def build_detail_table(
+    companies: list[tuple[str, str]], rows_by_stock: dict[str, list[dict]]
+) -> dict | None:
+    with_data = [stock for stock, _ in companies if rows_by_stock.get(stock)]
+    if not with_data:
+        return None
+    has_cfs = all(any(r["fs_div"] == "CFS" for r in rows_by_stock[s]) for s in with_data)
+    basis = "CFS" if has_cfs else "OFS"
+
+    # 회사별 (년, 분기) → {계정: 행}
+    def quarters(rows: list[dict]) -> dict[tuple[int, int], dict[str, dict]]:
+        scoped = [r for r in rows if r["fs_div"] == basis]
+        found: dict[tuple[int, int], dict[str, dict]] = {}
+        for r in scoped:
+            if r["reprt_code"] in QUARTERLY:
+                found.setdefault((r["bsns_year"], ORDER[r["reprt_code"]]), {})[r["account_nm"]] = r
+        for year in {r["bsns_year"] for r in scoped if r["reprt_code"] == "11011"}:
+            for r in _fourth_quarter(scoped, year):
+                found.setdefault((year, 4), {})[r["account_nm"]] = r
+        return found
+
+    by_stock = {stock: quarters(rows_by_stock.get(stock, [])) for stock, _ in companies}
+    periods = sorted({p for found in by_stock.values() for p in found}, reverse=True)
+
+    def value(stock: str, period: tuple[int, int], account: str) -> str:
+        recs = by_stock[stock].get(period)
+        if recs is None:
+            return "미공시"
+        rec = recs.get(account)
+        return _cell(rec["amount"], rec["prev_amount"]) if rec else "-"
+
+    def margin(stock: str, period: tuple[int, int]) -> str:
+        recs = by_stock[stock].get(period)
+        return "미공시" if recs is None else _margin_cell(recs)
+
+    rows = []
+    for period in periods:
+        label = f"{period[0]}년 {period[1]}분기"
+        for account in ACCOUNTS:
+            rows.append(
+                [label, account, *(value(stock, period, account) for stock, _ in companies)]
+            )
+        rows.append([label, "영업이익률", *(margin(stock, period) for stock, _ in companies)])
+
+    note = f"{BASIS[basis]} 기준 · 괄호 안은 전년 동기 대비 · 4분기는 연간 − 1~3분기"
+    absent = [name for stock, name in companies if stock not in with_data]
+    if absent:
+        note += f" · {', '.join(absent)} 미공시"
+    return {
+        "columns": ["기간", "항목", *(name for _, name in companies)],
+        "rows": rows,
+        "note": note,
+    }

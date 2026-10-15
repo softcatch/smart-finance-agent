@@ -1,4 +1,4 @@
-from app.financial import build_table, period_label
+from app.financial import build_detail_table, build_table, period_label
 
 SEC = ("005930", "삼성전자")
 HYNIX = ("000660", "SK하이닉스")
@@ -153,3 +153,82 @@ def test_분기_순서로_가장_최근을_고른다():
 
 def test_데이터가_하나도_없으면_None():
     assert build_table([SEC, HYNIX], {"005930": [], "000660": []}) is None
+
+
+def test_상세_표는_최근_분기부터_분기마다_네_줄이다():
+    sec_2025_q3 = _rows("005930", 2025, "11014", revenue=(86_000_000_000_000, 79_000_000_000_000))
+
+    table = build_detail_table([SEC], {"005930": SEC_Q1 + sec_2025_q3})
+
+    assert table["columns"] == ["기간", "항목", "삼성전자"]
+    assert [r[:2] for r in table["rows"]] == [
+        ["2026년 1분기", "매출액"],
+        ["2026년 1분기", "영업이익"],
+        ["2026년 1분기", "당기순이익"],
+        ["2026년 1분기", "영업이익률"],
+        ["2025년 3분기", "매출액"],
+        ["2025년 3분기", "영업이익"],
+        ["2025년 3분기", "당기순이익"],
+        ["2025년 3분기", "영업이익률"],
+    ]
+    assert table["rows"][0][2] == "791,405억원 (+10.0%)"  # 채팅 표와 같은 계산
+    assert table["rows"][1][2] == "66,853억원 (+1.2%)"
+    assert table["rows"][3][2] == "8.4% (-0.7%p)"
+    assert table["rows"][4][2] == "860,000억원 (+8.9%)"
+    assert table["rows"][5][2] == "-"  # 그 분기에 영업이익 행이 없다
+    assert "연결" in table["note"]
+
+
+def test_상세_표의_4분기는_연간에서_1_2_3분기를_뺀다():
+    table = build_detail_table([SEC], {"005930": SEC_2025})
+
+    assert [r[0] for r in table["rows"][::4]] == [
+        "2025년 4분기",
+        "2025년 3분기",
+        "2025년 2분기",
+        "2025년 1분기",
+    ]
+    assert table["rows"][1] == ["2025년 4분기", "영업이익", "200,737억원 (+209.2%)"]
+
+
+def test_상세_표에서_분기_보고서가_모자라면_4분기는_표시하지_않는다():
+    without_q2 = [r for r in SEC_2025 if r["reprt_code"] != "11012"]
+
+    table = build_detail_table([SEC], {"005930": without_q2})
+
+    assert ["2025년 4분기", "영업이익", "-"] in table["rows"]
+
+
+def test_상세_표에서_공시가_없는_분기는_미공시다():
+    hynix_q2 = _rows("000660", 2026, "11012", op=(5_000_000_000_000, 3_000_000_000_000))
+
+    table = build_detail_table([SEC, HYNIX], {"005930": SEC_Q1, "000660": hynix_q2})
+
+    assert table["columns"] == ["기간", "항목", "삼성전자", "SK하이닉스"]
+    assert table["rows"][1] == ["2026년 2분기", "영업이익", "미공시", "50,000억원 (+66.7%)"]
+    assert table["rows"][5] == ["2026년 1분기", "영업이익", "66,853억원 (+1.2%)", "미공시"]
+
+
+def test_상세_표도_한_회사라도_연결이_없으면_모두_별도로_맞춘다():
+    sec_both = SEC_Q1 + _rows(
+        "005930", 2026, "11013", fs_div="OFS", op=(1_469_273_000_000, 2_007_380_000_000)
+    )
+    hynix_ofs_only = _rows(
+        "000660", 2026, "11013", fs_div="OFS", op=(2_000_000_000_000, 1_000_000_000_000)
+    )
+
+    table = build_detail_table([SEC, HYNIX], {"005930": sec_both, "000660": hynix_ofs_only})
+
+    assert "별도" in table["note"]
+    assert table["rows"][1][2:] == ["14,693억원 (-26.8%)", "20,000억원 (+100.0%)"]
+
+
+def test_상세_표에서_데이터가_없는_기업은_note에_미공시로_적는다():
+    table = build_detail_table([SEC, HYNIX], {"005930": SEC_Q1, "000660": []})
+
+    assert table["rows"][1] == ["2026년 1분기", "영업이익", "66,853억원 (+1.2%)", "미공시"]
+    assert "SK하이닉스 미공시" in table["note"]
+
+
+def test_상세_표에서_데이터가_하나도_없으면_None():
+    assert build_detail_table([SEC, HYNIX], {"005930": [], "000660": []}) is None
