@@ -2,6 +2,7 @@ package com.softcatch.smart.account;
 
 import com.softcatch.smart.TestcontainersConfiguration;
 import com.softcatch.smart.account.dto.request.ChargeRequest;
+import com.softcatch.smart.account.dto.request.OpenAccountRequest;
 import com.softcatch.smart.auth.dto.request.LoginRequest;
 import com.softcatch.smart.auth.dto.request.SignupRequest;
 import java.util.ArrayList;
@@ -19,6 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
@@ -29,11 +31,14 @@ import tools.jackson.databind.ObjectMapper;
 @AutoConfigureMockMvc
 class AccountControllerTest {
 
+  private static final String ACCOUNT_PASSWORD = "1234";
+
   private record MemberSession(Long memberId, String token) {}
 
   @Autowired private MockMvc mockMvc;
   @Autowired private AccountService accountService;
   @Autowired private AccountRepository accounts;
+  @Autowired private PasswordEncoder passwordEncoder;
   private final ObjectMapper json = new ObjectMapper();
 
   @Test
@@ -44,10 +49,36 @@ class AccountControllerTest {
         .perform(
             MockMvcRequestBuilders.post("/api/v1/accounts")
                 .header("Authorization", "Bearer " + session.token())
-                .header("Idempotency-Key", UUID.randomUUID().toString()))
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new OpenAccountRequest(ACCOUNT_PASSWORD))))
         .andExpect(MockMvcResultMatchers.status().isCreated())
         .andExpect(MockMvcResultMatchers.jsonPath("$.data.primary").value(true))
         .andExpect(MockMvcResultMatchers.jsonPath("$.data.balance").value(0));
+  }
+
+  @Test
+  void 계좌_비밀번호는_해시로_저장하고_응답에_내리지_않는다() throws Exception {
+    MemberSession session = signupAndLogin("acc" + System.nanoTime(), "pw12345!", "계좌비번");
+
+    String body =
+        mockMvc
+            .perform(
+                MockMvcRequestBuilders.post("/api/v1/accounts")
+                    .header("Authorization", "Bearer " + session.token())
+                    .header("Idempotency-Key", UUID.randomUUID().toString())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(json.writeValueAsString(new OpenAccountRequest(ACCOUNT_PASSWORD))))
+            .andExpect(MockMvcResultMatchers.status().isCreated())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    Long accountId = json.readTree(body).at("/data/accountId").asLong();
+    String hash = accounts.findById(accountId).orElseThrow().getPasswordHash();
+    Assertions.assertNotEquals(ACCOUNT_PASSWORD, hash);
+    Assertions.assertTrue(passwordEncoder.matches(ACCOUNT_PASSWORD, hash));
+    Assertions.assertFalse(body.toLowerCase().contains("password"), body);
   }
 
   @Test
@@ -59,7 +90,9 @@ class AccountControllerTest {
         .perform(
             MockMvcRequestBuilders.post("/api/v1/accounts")
                 .header("Authorization", "Bearer " + session.token())
-                .header("Idempotency-Key", UUID.randomUUID().toString()))
+                .header("Idempotency-Key", UUID.randomUUID().toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(new OpenAccountRequest(ACCOUNT_PASSWORD))))
         .andExpect(MockMvcResultMatchers.status().isCreated())
         .andExpect(MockMvcResultMatchers.jsonPath("$.data.primary").value(false));
   }
@@ -122,7 +155,7 @@ class AccountControllerTest {
     Callable<Long> attempt =
         () -> {
           barrier.await();
-          return accountService.open(session.memberId(), key).getId();
+          return accountService.open(session.memberId(), key, ACCOUNT_PASSWORD).getId();
         };
 
     ExecutorService pool = Executors.newFixedThreadPool(2);
@@ -143,7 +176,9 @@ class AccountControllerTest {
     Callable<Long> attempt =
         () -> {
           barrier.await();
-          return accountService.open(session.memberId(), UUID.randomUUID().toString()).getId();
+          return accountService
+              .open(session.memberId(), UUID.randomUUID().toString(), ACCOUNT_PASSWORD)
+              .getId();
         };
 
     ExecutorService pool = Executors.newFixedThreadPool(2);
@@ -362,7 +397,9 @@ class AccountControllerTest {
             .perform(
                 MockMvcRequestBuilders.post("/api/v1/accounts")
                     .header("Authorization", "Bearer " + token)
-                    .header("Idempotency-Key", idempotencyKey))
+                    .header("Idempotency-Key", idempotencyKey)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(json.writeValueAsString(new OpenAccountRequest(ACCOUNT_PASSWORD))))
             .andExpect(MockMvcResultMatchers.status().isCreated())
             .andReturn()
             .getResponse()

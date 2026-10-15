@@ -1,6 +1,7 @@
 package com.softcatch.smart.account;
 
 import com.softcatch.smart.account.dto.request.ChargeRequest;
+import com.softcatch.smart.account.dto.request.OpenAccountRequest;
 import com.softcatch.smart.account.dto.response.AccountListResponse;
 import com.softcatch.smart.account.dto.response.AccountResponse;
 import com.softcatch.smart.account.dto.response.ChargeResponse;
@@ -30,8 +31,11 @@ class AccountController {
 
   @PostMapping("/api/v1/accounts")
   ResponseEntity<ApiResponse<AccountResponse>> open(
-      @AuthenticationPrincipal Jwt jwt, @RequestHeader("Idempotency-Key") String idempotencyKey) {
-    Account account = accountService.open(Long.valueOf(jwt.getSubject()), idempotencyKey);
+      @AuthenticationPrincipal Jwt jwt,
+      @RequestHeader("Idempotency-Key") String idempotencyKey,
+      @RequestBody OpenAccountRequest request) {
+    Account account =
+        accountService.open(Long.valueOf(jwt.getSubject()), idempotencyKey, request.password());
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(
             ApiResponse.ok(

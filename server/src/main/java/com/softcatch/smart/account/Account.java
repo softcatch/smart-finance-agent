@@ -15,15 +15,22 @@ public class Account {
   private Long memberId;
   private String accountNumber;
   private String idempotencyKey;
+  private String passwordHash;
   private Long balance;
   private boolean isPrimary;
 
   protected Account() {}
 
-  Account(Long memberId, String accountNumber, String idempotencyKey, boolean isPrimary) {
+  Account(
+      Long memberId,
+      String accountNumber,
+      String idempotencyKey,
+      String passwordHash,
+      boolean isPrimary) {
     this.memberId = memberId;
     this.accountNumber = accountNumber;
     this.idempotencyKey = idempotencyKey;
+    this.passwordHash = passwordHash;
     this.balance = 0L;
     this.isPrimary = isPrimary;
   }
@@ -38,6 +45,10 @@ public class Account {
 
   public String getAccountNumber() {
     return accountNumber;
+  }
+
+  public String getPasswordHash() {
+    return passwordHash;
   }
 
   public Long getBalance() {

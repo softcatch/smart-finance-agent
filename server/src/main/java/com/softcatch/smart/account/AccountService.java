@@ -5,6 +5,7 @@ import com.softcatch.smart.common.ApiException;
 import com.softcatch.smart.common.ErrorCode;
 import java.security.SecureRandom;
 import java.util.List;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,28 +16,33 @@ class AccountService {
 
   private final AccountRepository accounts;
   private final MemberRepository members;
+  private final PasswordEncoder passwordEncoder;
   private final SecureRandom random = new SecureRandom();
 
-  AccountService(AccountRepository accounts, MemberRepository members) {
+  AccountService(
+      AccountRepository accounts, MemberRepository members, PasswordEncoder passwordEncoder) {
     this.accounts = accounts;
     this.members = members;
+    this.passwordEncoder = passwordEncoder;
   }
 
   @Transactional
-  Account open(Long memberId, String idempotencyKey) {
+  Account open(Long memberId, String idempotencyKey, String password) {
     // 같은 회원의 동시 개설 요청을 잠금으로 순서대로 처리한다 — 두 요청이 동시에
     // "내가 첫 계좌"라고 오판하지 않게 한다.
     members.findForUpdateById(memberId);
 
     return accounts
         .findByMemberIdAndIdempotencyKey(memberId, idempotencyKey)
-        .orElseGet(() -> createAccount(memberId, idempotencyKey));
+        .orElseGet(() -> createAccount(memberId, idempotencyKey, password));
   }
 
-  private Account createAccount(Long memberId, String idempotencyKey) {
+  private Account createAccount(Long memberId, String idempotencyKey, String password) {
     boolean primary = accounts.countByMemberId(memberId) == 0;
     String accountNumber = String.format("%012d", random.nextLong(ACCOUNT_NUMBER_BOUND));
-    return accounts.save(new Account(memberId, accountNumber, idempotencyKey, primary));
+    String passwordHash = passwordEncoder.encode(password);
+    return accounts.save(
+        new Account(memberId, accountNumber, idempotencyKey, passwordHash, primary));
   }
 
   @Transactional

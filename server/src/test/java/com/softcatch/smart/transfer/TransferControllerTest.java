@@ -4,6 +4,7 @@ import com.softcatch.smart.TestcontainersConfiguration;
 import com.softcatch.smart.account.Account;
 import com.softcatch.smart.account.AccountRepository;
 import com.softcatch.smart.account.dto.request.ChargeRequest;
+import com.softcatch.smart.account.dto.request.OpenAccountRequest;
 import com.softcatch.smart.alias.dto.request.AliasRequest;
 import com.softcatch.smart.auth.dto.request.LoginRequest;
 import com.softcatch.smart.auth.dto.request.SignupRequest;
@@ -36,6 +37,8 @@ import tools.jackson.databind.ObjectMapper;
 @SpringBootTest
 @AutoConfigureMockMvc
 class TransferControllerTest {
+
+  private static final String ACCOUNT_PASSWORD = "1234";
 
   private record MemberSession(Long memberId, String token) {}
 
@@ -555,7 +558,9 @@ class TransferControllerTest {
             .perform(
                 MockMvcRequestBuilders.post("/api/v1/accounts")
                     .header("Authorization", "Bearer " + token)
-                    .header("Idempotency-Key", UUID.randomUUID().toString()))
+                    .header("Idempotency-Key", UUID.randomUUID().toString())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(json.writeValueAsString(new OpenAccountRequest(ACCOUNT_PASSWORD))))
             .andExpect(MockMvcResultMatchers.status().isCreated())
             .andReturn()
             .getResponse()
