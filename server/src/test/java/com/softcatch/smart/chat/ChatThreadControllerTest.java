@@ -54,6 +54,7 @@ class ChatThreadControllerTest {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ChatThreadRepository chatThreads;
+  @Autowired private ChatDetailRepository chatDetails;
   private final ObjectMapper json = new ObjectMapper();
 
   @BeforeEach
@@ -170,6 +171,41 @@ class ChatThreadControllerTest {
             .getContentAsString();
 
     Assertions.assertFalse(body.contains("table"), body);
+  }
+
+  @Test
+  void 상세_보기_ID가_오면_그대로_전달하고_본인_것으로_기록한다() throws Exception {
+    String detailId = "dt_" + System.nanoTime();
+    FAKE_AI.responseBody =
+        "{\"success\":true,\"data\":{\"reply\":\"재무 비교입니다.\",\"guard\":\"PASS\",\"detailId\":\""
+            + detailId
+            + "\"},\"error\":null}";
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "채팅상세");
+    String threadId = createThread(session.token());
+
+    sendMessage(session.token(), threadId)
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.detailId").value(detailId));
+
+    Assertions.assertEquals(
+        session.memberId(), chatDetails.findByDetailId(detailId).orElseThrow().getMemberId());
+  }
+
+  @Test
+  void 상세_보기_ID가_없으면_detailId_필드를_내리지_않고_기록하지_않는다() throws Exception {
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "채팅무상세");
+    String threadId = createThread(session.token());
+    long before = chatDetails.count();
+
+    String body =
+        sendMessage(session.token(), threadId)
+            .andExpect(MockMvcResultMatchers.status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    Assertions.assertFalse(body.contains("detailId"), body);
+    Assertions.assertEquals(before, chatDetails.count());
   }
 
   @Test

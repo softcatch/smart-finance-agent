@@ -10,12 +10,17 @@ import org.springframework.stereotype.Service;
 class ChatMessageService {
 
   private final ChatThreadRepository chatThreads;
+  private final ChatDetailRepository chatDetails;
   private final ChatRateLimiter rateLimiter;
   private final AiClient aiClient;
 
   ChatMessageService(
-      ChatThreadRepository chatThreads, ChatRateLimiter rateLimiter, AiClient aiClient) {
+      ChatThreadRepository chatThreads,
+      ChatDetailRepository chatDetails,
+      ChatRateLimiter rateLimiter,
+      AiClient aiClient) {
     this.chatThreads = chatThreads;
+    this.chatDetails = chatDetails;
     this.rateLimiter = rateLimiter;
     this.aiClient = aiClient;
   }
@@ -27,6 +32,11 @@ class ChatMessageService {
         .filter(thread -> thread.getMemberId().equals(memberId))
         .orElseThrow(() -> new ApiException(ErrorCode.THREAD_NOT_FOUND));
     rateLimiter.check(memberId);
-    return aiClient.chat(token, threadId, message);
+    ChatMessageResponse response = aiClient.chat(token, threadId, message);
+    // 답변에 상세 보기 ID가 붙어 오면 누구 것인지 기록한다(E-13의 본인 확인용)
+    if (response.detailId() != null) {
+      chatDetails.save(new ChatDetail(response.detailId(), memberId));
+    }
+    return response;
   }
 }
