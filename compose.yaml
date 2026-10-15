@@ -19,6 +19,7 @@ services:
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       SMART_JWT_SECRET: ${SMART_JWT_SECRET}
+      SMART_AI_BASE_URL: http://ai:8000
     ports:
       - "8080:8080"
     depends_on:
@@ -28,6 +29,9 @@ services:
   # 내부 전용: 포트를 밖으로 열지 않는다(Spring만 호출)
   ai:
     build: ./ai
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-nano}
 
 volumes:
   db-data:
