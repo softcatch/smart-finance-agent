@@ -75,3 +75,32 @@ def test_같은_대화면_앞_대화를_기억한다():
     graph.invoke({"message": "내 이름 뭐야?"}, _cfg("th_1"))
 
     assert seen[1] == [SYSTEM_PROMPT, "내 이름은 진호야", "답1", "내 이름 뭐야?"]
+
+
+def test_다른_대화는_기록이_섞이지_않는다():
+    llm, seen = _spy()
+    graph = build_graph(llm)
+
+    graph.invoke({"message": "내 이름은 진호야"}, _cfg("th_1"))
+    graph.invoke({"message": "내 이름 뭐야?"}, _cfg("th_2"))
+
+    assert seen[1] == [SYSTEM_PROMPT, "내 이름 뭐야?"]
+
+
+def test_엔드포인트도_threadId별로_분리된다():
+    llm, seen = _spy()
+    graph = build_graph(llm)
+    app.dependency_overrides[get_graph] = lambda: graph  # 같은 그래프 = 같은 체크포인터
+    try:
+        client = TestClient(app)
+        for thread_id, message in [
+            ("th_1", "내 이름은 진호야"),
+            ("th_2", "내 이름 뭐야?"),
+            ("th_1", "내 이름 뭐야?"),
+        ]:
+            client.post("/internal/chat", json={"threadId": thread_id, "message": message})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert seen[1] == [SYSTEM_PROMPT, "내 이름 뭐야?"]
+    assert seen[2] == [SYSTEM_PROMPT, "내 이름은 진호야", "답1", "내 이름 뭐야?"]
