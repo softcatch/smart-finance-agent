@@ -223,6 +223,25 @@ def test_수취인을_못_찾으면_금액은_남기고_수취인을_다시_묻�
     assert second["transfer_card"] == CARD
 
 
+def test_무효_금액을_말하면_앞에서_말한_금액으로_카드를_만들지_않고_다시_묻는다():
+    graph = build_graph(
+        _spy()[0],
+        _extractor(
+            TransferSlots(is_transfer=True, amount=10000),
+            TransferSlots(is_transfer=True, amount=0, alias="엄마"),
+        ),
+    )
+
+    def create(pending):
+        raise AssertionError("호출되면 안 됨")
+
+    graph.invoke({"message": "1만원 보내줘"}, _cfg("th_1", create))
+    out = graph.invoke({"message": "엄마에게 0원"}, _cfg("th_1", create))
+
+    assert out["reply"] == "얼마를 보낼까요?"
+    assert out["transfer_card"] is None
+
+
 def test_송금이_아니면_일반_답변이고_송금_요청을_만들지_않는다():
     llm, seen = _spy()
     graph = build_graph(llm, _plain())

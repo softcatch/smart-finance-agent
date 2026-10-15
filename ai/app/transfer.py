@@ -18,9 +18,10 @@ def merge(pending: dict, slots: TransferSlots) -> dict:
     got = {
         k: v for k, v in slots.model_dump(exclude={"is_transfer"}).items() if v not in (None, "")
     }
-    if got.get("amount", 1) <= 0:
-        del got["amount"]
     merged = {**pending, **got}
+    # 0 이하 금액은 쓸 수 없다 — 앞에서 말한 금액으로 되돌아가지 않고 다시 묻는다
+    if merged.get("amount", 1) <= 0:
+        del merged["amount"]
     # 수취인은 계좌번호·별칭 중 하나 — 새로 말한 쪽이 이긴다(둘 다 말하면 계좌번호)
     if "recipient_account_number" in got:
         merged.pop("alias", None)

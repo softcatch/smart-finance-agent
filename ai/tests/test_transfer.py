@@ -42,6 +42,11 @@ def test_수취인을_바꿔_말하면_새_값이_이긴다():
     ) == {"alias": "엄마", "amount": 10000}
 
 
-def test_0_이하_금액과_빈_문자열은_없는_값으로_본다():
+def test_0_이하_금액은_앞에서_말한_금액도_접는다():
     assert merge({}, _slots(amount=0, alias="엄마")) == {"alias": "엄마"}
-    assert merge({"amount": 5000}, _slots(amount=-1, alias="")) == {"amount": 5000}
+    # 최신 발화가 쓸 수 없는 금액이면 이전 금액으로 되돌아가지 않고 다시 묻는다
+    assert merge({"amount": 5000}, _slots(amount=-1, alias="엄마")) == {"alias": "엄마"}
+
+
+def test_빈_문자열은_말하지_않은_값으로_본다():
+    assert merge({"amount": 5000}, _slots(alias="")) == {"amount": 5000}
