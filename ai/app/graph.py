@@ -135,6 +135,9 @@ def build_graph(llm: BaseChatModel, extractor=None):
             return {"messages": [AIMessage(ASK_COMPANY)], "reply": ASK_COMPANY}
         try:
             companies, missing, rows = config["configurable"]["compare_financials"](names)
+        except psycopg.errors.UndefinedTable:  # 수집 전(DART 키가 없으면 테이블도 아직 없다)
+            reply = "재무 데이터가 아직 수집되지 않았습니다. 수집이 끝난 뒤 다시 물어봐 주세요."
+            return {"messages": [AIMessage(reply)], "reply": reply}
         except psycopg.OperationalError:  # DB를 못 읽어도 채팅은 이어진다
             reply = "재무 데이터를 지금 읽을 수 없습니다. 잠시 후 다시 시도해 주세요."
             return {"messages": [AIMessage(reply)], "reply": reply}

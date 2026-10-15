@@ -603,6 +603,22 @@ def test_DB를_읽지_못하면_안내하고_채팅은_이어진다():
     assert "읽을 수 없" in out["reply"]
 
 
+def test_재무_테이블이_아직_없으면_미수집으로_안내한다():
+    # DART 키가 비어 있으면 수집기가 테이블을 만들기 전에 끝난다 — 이 상태의 질문이 500이 되면 안 된다
+    graph = build_graph(
+        _spy()[0],
+        _extractor(TransferSlots(is_transfer=False, is_financial=True, companies=["삼성전자"])),
+    )
+
+    def compare(names):
+        raise psycopg.errors.UndefinedTable('relation "company" does not exist')
+
+    out = graph.invoke({"message": "삼성전자 실적"}, _cfg("th_1", compare_financials=compare))
+
+    assert out["table"] is None
+    assert "수집" in out["reply"]
+
+
 def test_표는_다음_턴에_남지_않는다():
     graph = build_graph(
         _spy()[0],
