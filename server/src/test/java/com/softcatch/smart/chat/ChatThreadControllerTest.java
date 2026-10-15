@@ -143,6 +143,36 @@ class ChatThreadControllerTest {
   }
 
   @Test
+  void 표가_있으면_table을_그대로_전달한다() throws Exception {
+    FAKE_AI.responseBody =
+        "{\"success\":true,\"data\":{\"reply\":\"재무 비교입니다.\",\"guard\":\"PASS\",\"table\":{\"columns\":[\"항목\",\"삼성전자\",\"SK하이닉스\"],\"rows\":[[\"매출액\",\"791,405억원 (+10.0%)\",\"미공시\"],[\"영업이익\",\"66,853억원 (+1.2%)\",\"미공시\"]],\"note\":\"2026년 1분기 · 연결 기준\"}},\"error\":null}";
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "채팅표");
+    String threadId = createThread(session.token());
+
+    sendMessage(session.token(), threadId)
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.table.columns[1]").value("삼성전자"))
+        .andExpect(
+            MockMvcResultMatchers.jsonPath("$.data.table.rows[0][1]").value("791,405억원 (+10.0%)"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.table.note").value("2026년 1분기 · 연결 기준"));
+  }
+
+  @Test
+  void 표가_없으면_table_필드를_내리지_않는다() throws Exception {
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "채팅무표");
+    String threadId = createThread(session.token());
+
+    String body =
+        sendMessage(session.token(), threadId)
+            .andExpect(MockMvcResultMatchers.status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    Assertions.assertFalse(body.contains("table"), body);
+  }
+
+  @Test
   void 남의_스레드면_404_THREAD_NOT_FOUND이고_FastAPI를_부르지_않는다() throws Exception {
     MemberSession owner = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "주인");
     MemberSession other = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "타인");
