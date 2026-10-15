@@ -56,6 +56,30 @@ def test_같은_키를_다시_넣으면_덮어쓴다_정정_공시(conn):
     assert rows[0][7] == "20250601000009"  # 정정본의 접수번호
 
 
+def test_정정본에서_빠진_계정과_재무제표는_남기지_않는다(conn):
+    # 원본: 연결·별도 영업이익과 매출액. 정정본: 별도 영업이익만 남음(FR-022 — 같은 회사·기간을 통째로 바꾼다)
+    upsert_financials(
+        conn, [_row(fs_div="CFS"), _row(fs_div="OFS"), _row(fs_div="CFS", account_nm="매출액")]
+    )
+
+    upsert_financials(conn, [_row(fs_div="OFS", amount=1)])
+
+    rows = _all(conn)
+    assert len(rows) == 1
+    assert (rows[0][3], rows[0][4], rows[0][5]) == ("OFS", "영업이익", 1)
+
+
+def test_다른_기간과_다른_회사의_행은_건드리지_않는다(conn):
+    upsert_financials(
+        conn,
+        [_row(), _row(reprt_code="11012"), _row(bsns_year=2024), _row(stock_code="000660")],
+    )
+
+    upsert_financials(conn, [_row(amount=5)])  # 005930·2025·11013만 교체
+
+    assert len(_all(conn)) == 4
+
+
 def test_키가_다르면_별개_행이다(conn):
     upsert_financials(
         conn,

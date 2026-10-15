@@ -42,9 +42,17 @@ def upsert_companies(conn: psycopg.Connection, companies: list[tuple[str, str, s
     conn.commit()
 
 
-# 금액 값은 당기(분기)·누적·전기(전년 동기). 키가 같으면 새 값으로 덮어쓴다.
+# 같은 회사·기간 데이터를 통째로 바꾼다(FR-022). 응답에 들어 있는 (회사, 사업연도, 보고서)만 먼저 지워서,
+# 정정본에서 빠진 계정·재무제표가 남지 않게 한다. 응답에 없는 회사의 기존 데이터는 건드리지 않는다.
+# 금액 값은 당기(분기)·누적·전기(전년 동기). 지우기와 넣기는 한 트랜잭션이다.
 def upsert_financials(conn: psycopg.Connection, rows: list[dict]) -> int:
+    periods = {(r["stock_code"], r["bsns_year"], r["reprt_code"]) for r in rows}
     with conn.cursor() as cur:
+        cur.executemany(
+            "DELETE FROM financial WHERE stock_code = %s AND bsns_year = %s AND reprt_code = %s",
+            list(periods),
+        )
+        # 한 응답 안에 같은 키가 두 번 와도 깨지지 않게 충돌은 덮어쓴다.
         cur.executemany(
             "INSERT INTO financial (stock_code, bsns_year, reprt_code, fs_div, account_nm, "
             "amount, add_amount, prev_amount, rcept_no) "
