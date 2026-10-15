@@ -1,0 +1,42 @@
+from pydantic import BaseModel, Field
+
+
+# LLM이 사용자 메시지에서 뽑는 송금 값. 말하지 않은 값은 None.
+class TransferSlots(BaseModel):
+    is_transfer: bool = Field(description="송금 요청이거나, 진행 중인 송금 정보를 이어 말하면 true")
+    amount: int | None = Field(default=None, description="금액(원 단위 정수). 말하지 않았으면 null")
+    recipient_account_number: str | None = Field(
+        default=None, description="수취인 계좌번호(숫자). 말하지 않았으면 null"
+    )
+    alias: str | None = Field(
+        default=None, description="수취인 별칭(예: 엄마). 말하지 않았으면 null"
+    )
+
+
+# 진행 중인 값(pending)에 이번에 말한 값을 합친다. 새로 말한 값이 이긴다.
+def merge(pending: dict, slots: TransferSlots) -> dict:
+    got = {
+        k: v for k, v in slots.model_dump(exclude={"is_transfer"}).items() if v not in (None, "")
+    }
+    if got.get("amount", 1) <= 0:
+        del got["amount"]
+    merged = {**pending, **got}
+    # 수취인은 계좌번호·별칭 중 하나 — 새로 말한 쪽이 이긴다(둘 다 말하면 계좌번호)
+    if "recipient_account_number" in got:
+        merged.pop("alias", None)
+    elif "alias" in got:
+        merged.pop("recipient_account_number", None)
+    return merged
+
+
+# 빠진 값을 되묻는 고정 문장. 다 모였으면 None.
+def ask_for(pending: dict) -> str | None:
+    has_amount = "amount" in pending
+    has_recipient = "recipient_account_number" in pending or "alias" in pending
+    if has_amount and has_recipient:
+        return None
+    if not has_amount and not has_recipient:
+        return "송금할 금액과 받는 분(계좌번호 또는 별칭)을 알려 주세요."
+    if not has_amount:
+        return "얼마를 보낼까요?"
+    return "누구에게 보낼까요? 계좌번호나 별칭을 알려 주세요."
