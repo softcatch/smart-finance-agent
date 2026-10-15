@@ -24,6 +24,21 @@ CREATE TABLE IF NOT EXISTS financial (
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (stock_code, bsns_year, reprt_code, fs_div, account_nm)
 );
+
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- 사업의 내용(FR-021). 회사별 최신 보고서의 청크만 둔다: 새 접수번호가 오면 회사 단위로 통째로 바꾼다.
+-- 벡터 인덱스는 없다 — 검색은 회사 하나로 좁힌 뒤 수십~수백 행만 훑는다. 임베딩 모델을 바꾸면 차원도 바꾼다.
+CREATE TABLE IF NOT EXISTS business_chunk (
+    stock_code  VARCHAR(6)   NOT NULL,
+    seq         INTEGER      NOT NULL,
+    rcept_no    VARCHAR(14)  NOT NULL,
+    report_nm   VARCHAR(100) NOT NULL,
+    section     TEXT         NOT NULL,  -- 소제목 경로(출처 표시)
+    content     TEXT         NOT NULL,
+    embedding   vector(1536) NOT NULL,
+    PRIMARY KEY (stock_code, seq)
+);
 """
 
 
@@ -112,3 +127,34 @@ def load_financials(conn: psycopg.Connection, stock_codes: list[str]) -> dict[st
         for row in cur:
             grouped[row["stock_code"]].append(row)
     return grouped
+
+
+# 회사에 저장된 사업의 내용이 어느 보고서(접수번호)의 것인지. 없으면 None.
+def business_rcept_no(conn: psycopg.Connection, stock_code: str) -> str | None:
+    row = conn.execute(
+        "SELECT rcept_no FROM business_chunk WHERE stock_code = %s LIMIT 1", (stock_code,)
+    ).fetchone()
+    return row[0] if row else None
+
+
+# 회사의 사업의 내용을 새 보고서의 청크로 통째로 바꾼다 — 회사별 최신 보고서만 유지(FR-021).
+# chunks: [(소제목, 본문, 벡터)]. 지우기와 넣기는 한 트랜잭션이라 중간에 실패하면 기존 청크가 남는다.
+def replace_business_chunks(
+    conn: psycopg.Connection,
+    stock_code: str,
+    report: dict,
+    chunks: list[tuple[str, str, list[float]]],
+) -> int:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM business_chunk WHERE stock_code = %s", (stock_code,))
+        cur.executemany(
+            "INSERT INTO business_chunk "
+            "(stock_code, seq, rcept_no, report_nm, section, content, embedding) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s::vector)",
+            [
+                (stock_code, seq, report["rcept_no"], report["report_nm"], section, content, str(v))
+                for seq, (section, content, v) in enumerate(chunks)
+            ],
+        )
+    conn.commit()
+    return len(chunks)

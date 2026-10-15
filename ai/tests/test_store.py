@@ -1,7 +1,12 @@
+import psycopg
+import pytest
+
 from app.store import (
+    business_rcept_no,
     ensure_schema,
     find_companies,
     load_financials,
+    replace_business_chunks,
     upsert_companies,
     upsert_financials,
 )
@@ -174,3 +179,84 @@ def test_회사별로_재무_행을_묶어_읽는다(conn):
 
 def test_행이_없는_회사는_빈_목록(conn):
     assert load_financials(conn, ["005930"]) == {"005930": []}
+
+
+def _vec(i: int, value: float = 1.0) -> list[float]:
+    v = [0.0] * 1536
+    v[i] = value
+    return v
+
+
+REPORT = {"rcept_no": "20260814003699", "report_nm": "반기보고서 (2026.06)"}
+
+
+def test_사업의_내용을_넣고_접수번호를_읽는다(conn):
+    assert business_rcept_no(conn, "005930") is None
+
+    n = replace_business_chunks(
+        conn,
+        "005930",
+        REPORT,
+        [("1. 사업의 개요", "본문1", _vec(0)), ("2. 제품", "본문2", _vec(1))],
+    )
+
+    assert n == 2
+    assert business_rcept_no(conn, "005930") == "20260814003699"
+    rows = conn.execute(
+        "SELECT seq, report_nm, section, content FROM business_chunk "
+        "WHERE stock_code = '005930' ORDER BY seq"
+    ).fetchall()
+    assert rows == [
+        (0, "반기보고서 (2026.06)", "1. 사업의 개요", "본문1"),
+        (1, "반기보고서 (2026.06)", "2. 제품", "본문2"),
+    ]
+
+
+def test_새_보고서가_오면_그_회사만_통째로_바꾼다(conn):
+    old = {"rcept_no": "20260515002181", "report_nm": "분기보고서 (2026.03)"}
+    replace_business_chunks(
+        conn, "005930", old, [("a", "x", _vec(0)), ("b", "y", _vec(1)), ("c", "z", _vec(2))]
+    )
+    replace_business_chunks(conn, "000660", old, [("a", "다른 회사", _vec(0))])
+
+    replace_business_chunks(conn, "005930", REPORT, [("a", "새 본문", _vec(3))])
+
+    assert business_rcept_no(conn, "005930") == "20260814003699"
+    contents = conn.execute(
+        "SELECT stock_code, content FROM business_chunk ORDER BY stock_code, seq"
+    ).fetchall()
+    assert contents == [("000660", "다른 회사"), ("005930", "새 본문")]
+
+
+def test_넣다가_실패하면_기존_청크가_남는다(conn):
+    old = {"rcept_no": "20260515002181", "report_nm": "분기보고서 (2026.03)"}
+    replace_business_chunks(conn, "005930", old, [("a", "옛 본문", _vec(0))])
+
+    with pytest.raises(psycopg.Error):  # 차원이 맞지 않는 벡터
+        replace_business_chunks(conn, "005930", REPORT, [("a", "새 본문", [0.1, 0.2])])
+    conn.rollback()
+
+    assert business_rcept_no(conn, "005930") == "20260515002181"
+    assert conn.execute("SELECT content FROM business_chunk").fetchall() == [("옛 본문",)]
+
+
+def test_저장한_벡터로_가까운_청크를_찾는다(conn):
+    replace_business_chunks(
+        conn,
+        "005930",
+        REPORT,
+        [
+            ("제품", "TV와 반도체", _vec(0)),
+            ("수주", "수주잔고", _vec(1)),
+            ("연구", "R&D 투자", _vec(2)),
+        ],
+    )
+    query = str(_vec(1, 0.9))  # 두 번째 청크 방향
+
+    rows = conn.execute(
+        "SELECT content FROM business_chunk WHERE stock_code = %s "
+        "ORDER BY embedding <=> %s::vector LIMIT 2",
+        ("005930", query),
+    ).fetchall()
+
+    assert rows[0] == ("수주잔고",)

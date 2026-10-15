@@ -1,10 +1,19 @@
 import io
 import zipfile
+from datetime import date
 
 import httpx
 import pytest
 
-from app.dart import DartError, fetch_corp_codes, fetch_financials, parse_amount, parse_financials
+from app.dart import (
+    DartError,
+    fetch_corp_codes,
+    fetch_document,
+    fetch_financials,
+    fetch_latest_report,
+    parse_amount,
+    parse_financials,
+)
 
 
 def _item(account, fs_div="CFS", sj_div="IS", stock_code="005930", **kw):
@@ -181,3 +190,116 @@ def test_기업코드_인증_오류는_XML로_온다(monkeypatch):
 
     with pytest.raises(DartError, match="010"):
         fetch_corp_codes("BAD")
+
+
+def _report(rcept_no, name):
+    return {
+        "rcept_no": rcept_no,
+        "report_nm": name,
+        "corp_code": "00126380",
+        "rcept_dt": rcept_no[:8],
+    }
+
+
+def test_최신_정기보고서는_보고_기간_다음_접수번호_순으로_고른다(monkeypatch):
+    body = {
+        "status": "000",
+        "message": "정상",
+        "list": [
+            _report("20260515002181", "분기보고서 (2026.03)"),
+            _report("20260814003699", "반기보고서 (2026.06)"),
+            _report("20260310002820", "사업보고서 (2025.12)"),
+            # 지난 기간의 정정본이 더 늦게 나와도 최신 기간(2026.06)을 밀어내지 않는다
+            _report("20261001000100", "[기재정정]사업보고서 (2025.12)"),
+            _report("20260920000200", "[기재정정]반기보고서 (2026.06)"),
+            _report("20260601000300", "주요사항보고서(자기주식취득결정)"),
+        ],
+    }
+    monkeypatch.setattr(httpx, "get", lambda url, **kw: _response(body))
+
+    report = fetch_latest_report("KEY", "00126380", date(2026, 10, 15))
+
+    assert report == {"rcept_no": "20260920000200", "report_nm": "[기재정정]반기보고서 (2026.06)"}
+
+
+def test_공시검색_요청_인자(monkeypatch):
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append((url, kwargs))
+        return _response({"status": "013", "message": "조회된 데이타가 없습니다."})
+
+    monkeypatch.setattr(httpx, "get", get)
+
+    fetch_latest_report("KEY", "00126380", date(2026, 10, 15))
+
+    url, kwargs = calls[0]
+    assert url == "https://opendart.fss.or.kr/api/list.json"
+    assert kwargs["params"] == {
+        "crtfc_key": "KEY",
+        "corp_code": "00126380",
+        "pblntf_ty": "A",
+        "bgn_de": "20250910",
+        "end_de": "20261015",
+        "page_count": "100",
+    }
+
+
+def test_정기보고서가_없으면_None(monkeypatch):
+    none = {"status": "013", "message": "조회된 데이타가 없습니다."}
+    other = {
+        "status": "000",
+        "message": "정상",
+        "list": [_report("1", "주요사항보고서(유상증자결정)")],
+    }
+
+    for body in (none, other):
+        monkeypatch.setattr(httpx, "get", lambda url, body=body, **kw: _response(body))
+
+        assert fetch_latest_report("KEY", "00126380", date(2026, 10, 15)) is None
+
+
+def test_공시검색_인증_오류는_원인을_알린다(monkeypatch):
+    body = {"status": "010", "message": "등록되지 않은 인증키입니다."}
+    monkeypatch.setattr(httpx, "get", lambda url, **kw: _response(body))
+
+    with pytest.raises(DartError, match="010"):
+        fetch_latest_report("BAD", "00126380", date(2026, 10, 15))
+
+
+def _doc_zip(rcept_no: str) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr(f"{rcept_no}_00760.xml", "<attachment/>")  # 감사보고서 같은 첨부
+        z.writestr(f"{rcept_no}.xml", "<DOCUMENT>본문</DOCUMENT>")
+    return buf.getvalue()
+
+
+def test_원문은_ZIP_안의_접수번호_파일을_돌려준다(monkeypatch):
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append((url, kwargs))
+        return httpx.Response(
+            200, content=_doc_zip("20260814003699"), request=httpx.Request("GET", url)
+        )
+
+    monkeypatch.setattr(httpx, "get", get)
+
+    xml = fetch_document("KEY", "20260814003699")
+
+    assert xml == "<DOCUMENT>본문</DOCUMENT>".encode()
+    assert calls[0][0] == "https://opendart.fss.or.kr/api/document.xml"
+    assert calls[0][1]["params"] == {"crtfc_key": "KEY", "rcept_no": "20260814003699"}
+
+
+def test_원문_오류는_XML로_온다(monkeypatch):
+    # 실제 서버: 없는 접수번호는 HTTP 200 + XML(status 013)
+    xml = '<?xml version="1.0"?><result><status>013</status><message>접수번호 오류 : 1</message></result>'
+    res = httpx.Response(
+        200, content=xml.encode(), request=httpx.Request("GET", "https://opendart")
+    )
+    monkeypatch.setattr(httpx, "get", lambda url, **kw: res)
+
+    with pytest.raises(DartError, match="013.*접수번호 오류"):
+        fetch_document("KEY", "1")
