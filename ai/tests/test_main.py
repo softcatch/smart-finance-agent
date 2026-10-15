@@ -1,9 +1,11 @@
 from typing import ClassVar
 
+import psycopg
 import pytest
 from langchain_core.runnables import RunnableLambda
 
 from app import main
+from app.store import replace_business_chunks, upsert_companies
 from app.transfer import TransferSlots
 
 
@@ -50,3 +52,47 @@ def test_빈_값이면_추론_강도를_보내지_않는다(monkeypatch):
     main.get_graph()
 
     assert "reasoning_effort" not in FakeOpenAI.kwargs
+
+
+def _vec(i: int) -> list[float]:
+    v = [0.0] * 1536
+    v[i] = 1.0
+    return v
+
+
+REPORT = {"rcept_no": "20260814003699", "report_nm": "반기보고서 (2026.06)"}
+
+
+# 실제 PostgreSQL(pgvector)로 확인한다. 연결만 테스트 DB로 바꾸고, 질문 임베딩은 가짜로 둔다.
+def test_사업의_내용_검색은_찾은_기업의_청크만_질문_벡터로_가져온다(
+    conn, database_url, monkeypatch
+):
+    upsert_companies(
+        conn, [("005930", "00126380", "삼성전자"), ("000660", "00164779", "SK하이닉스")]
+    )
+    replace_business_chunks(
+        conn, "005930", REPORT, [("개요", "TV와 반도체", _vec(0)), ("제품", "메모리 제품", _vec(1))]
+    )
+    replace_business_chunks(conn, "000660", REPORT, [("제품", "다른 회사", _vec(1))])
+    asked = []
+    monkeypatch.setattr(main, "_connect", lambda: psycopg.connect(database_url))
+    monkeypatch.setattr(main, "embed_texts", lambda texts: asked.append(texts) or [_vec(1)])
+
+    companies, missing, chunks = main.search_business(["삼성전자", "삼전"], "주요 제품이 뭐야?")
+
+    assert companies == [("005930", "삼성전자")]
+    assert missing == ["삼전"]
+    assert asked == [["주요 제품이 뭐야?"]]
+    assert [c["content"] for c in chunks["005930"]] == ["메모리 제품", "TV와 반도체"]
+
+
+def test_찾을_기업이_없으면_질문을_임베딩하지_않는다(conn, database_url, monkeypatch):
+    upsert_companies(conn, [("005930", "00126380", "삼성전자")])
+    monkeypatch.setattr(main, "_connect", lambda: psycopg.connect(database_url))
+
+    def embed(texts):
+        raise AssertionError("호출되면 안 됨")
+
+    monkeypatch.setattr(main, "embed_texts", embed)
+
+    assert main.search_business(["삼전"], "사업 내용") == ([], ["삼전"], {})

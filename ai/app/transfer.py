@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from app.history import Period
 
 
-# LLM이 사용자 메시지에서 뽑는 의도(송금·내역 조회·재무 비교)와 값. 말하지 않은 값은 None.
+# LLM이 사용자 메시지에서 뽑는 의도(송금·내역 조회·재무 비교·사업의 내용)와 값. 말하지 않은 값은 None.
 class TransferSlots(BaseModel):
     is_transfer: bool = Field(description="송금 요청이거나, 진행 중인 송금 정보를 이어 말하면 true")
     is_history: bool = Field(
@@ -16,8 +16,13 @@ class TransferSlots(BaseModel):
         default=False,
         description="기업의 매출액·영업이익·순이익 같은 재무 실적을 묻거나 기업끼리 비교하면 true",
     )
+    is_business: bool = Field(
+        default=False,
+        description="기업의 회사 소개·주요 제품·사업 구조 같은 사업의 내용을 물으면 true",
+    )
     companies: list[str] = Field(
-        default_factory=list, description="재무를 묻는 기업 이름(말한 그대로). 없으면 빈 목록"
+        default_factory=list,
+        description="재무나 사업의 내용을 묻는 기업 이름(말한 그대로). 없으면 빈 목록",
     )
     amount: int | None = Field(default=None, description="금액(원 단위 정수). 말하지 않았으면 null")
     recipient_account_number: str | None = Field(
@@ -33,7 +38,14 @@ def merge(pending: dict, slots: TransferSlots) -> dict:
     got = {
         k: v
         for k, v in slots.model_dump(
-            exclude={"is_transfer", "is_history", "period", "is_financial", "companies"}
+            exclude={
+                "is_transfer",
+                "is_history",
+                "period",
+                "is_financial",
+                "is_business",
+                "companies",
+            }
         ).items()
         if v not in (None, "")
     }
