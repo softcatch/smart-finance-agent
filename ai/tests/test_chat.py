@@ -29,7 +29,7 @@ def test_개인정보는_가린_채로_LLM에_간다():
 
     out = build_graph(llm).invoke({"message": "카드 1234-5678-9012-3456 확인해줘"})
 
-    assert out["message"] == "카드 [카드번호] 확인해줘"
+    assert out["messages"][0].content == "카드 [카드번호] 확인해줘"
     assert llm.i == 1
 
 

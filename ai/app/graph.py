@@ -1,7 +1,6 @@
-from typing import TypedDict
-
 from langchain_core.language_models import BaseChatModel
-from langgraph.graph import END, START, StateGraph
+from langchain_core.messages import HumanMessage, SystemMessage
+from langgraph.graph import END, START, MessagesState, StateGraph
 
 from app.guard import is_injection, mask_pii
 
@@ -9,7 +8,8 @@ SYSTEM_PROMPT = "너는 SMART 금융 비서다. 사용자의 금융 질문에 �
 INJECTION_REPLY = "요청하신 내용은 처리할 수 없습니다."
 
 
-class ChatState(TypedDict, total=False):
+# messages: 이 대화의 사용자·AI 메시지 기록(LLM에 목록째 넘김). message는 이번 턴 입력.
+class ChatState(MessagesState, total=False):
     message: str
     reply: str
     guard: str
@@ -20,13 +20,12 @@ def build_graph(llm: BaseChatModel):
     def input_guard(state: ChatState) -> ChatState:
         message = mask_pii(state["message"])
         if is_injection(message):
-            return {"message": message, "reply": INJECTION_REPLY, "guard": "INJECTION"}
-        return {"message": message, "guard": "PASS"}
+            return {"reply": INJECTION_REPLY, "guard": "INJECTION"}  # 막힌 문장은 기록에 안 넣는다
+        return {"messages": [HumanMessage(message)], "guard": "PASS"}
 
     def answer(state: ChatState) -> ChatState:
-        return {
-            "reply": llm.invoke([("system", SYSTEM_PROMPT), ("human", state["message"])]).content
-        }
+        ai = llm.invoke([SystemMessage(SYSTEM_PROMPT), *state["messages"]])
+        return {"messages": [ai], "reply": ai.content}
 
     graph = StateGraph(ChatState)
     graph.add_node("input_guard", input_guard)
