@@ -17,6 +17,12 @@ def conn(database_url):
 
     with psycopg.connect(database_url) as connection:
         ensure_schema(connection)
-        connection.execute("TRUNCATE financial, company, business_chunk")
+        connection.execute("TRUNCATE financial, company, business_chunk, chat_log")
         connection.commit()
         yield connection
+
+
+# 채팅 엔드포인트 테스트가 개발 DB에 로그를 쓰지 않게 막는다. 로그를 확인하는 테스트는 이 값을 다시 바꾼다.
+@pytest.fixture(autouse=True)
+def no_chat_log(monkeypatch):
+    monkeypatch.setattr("app.main.log_chat", lambda *args: None)
