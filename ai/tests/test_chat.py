@@ -116,3 +116,28 @@ def test_막힌_문장은_기록에_남지_않는다():
     assert blocked["guard"] == "INJECTION"
     assert seen == [[SYSTEM_PROMPT, "잔액 알려줘"]]  # 막힌 문장이 다음 턴 LLM 입력에 없다
     assert out["guard"] == "PASS"
+
+
+def test_개인정보는_기록에_가린_채로만_남는다():
+    llm, seen = _spy()
+    graph = build_graph(llm)
+    app.dependency_overrides[get_graph] = lambda: graph
+    try:
+        client = TestClient(app)
+        for message in [
+            "카드 1234-5678-9012-3456 주민 900101-1234567 확인해줘",
+            "방금 말한 거 다시",
+        ]:
+            client.post("/internal/chat", json={"threadId": "th_1", "message": message})
+    finally:
+        app.dependency_overrides.clear()
+
+    # 체크포인터가 저장한 모든 것(그래프 입력·채널·쓰기 기록)에 원문이 없어야 한다
+    stored = repr(vars(graph.checkpointer))
+    assert "1234-5678-9012-3456" not in stored
+    assert "900101-1234567" not in stored
+    state = graph.get_state(_cfg("th_1")).values
+    assert state["messages"][0].content == "카드 [카드번호] 주민 [주민번호] 확인해줘"
+    assert (
+        seen[1][1] == "카드 [카드번호] 주민 [주민번호] 확인해줘"
+    )  # 다음 턴 LLM 입력에도 가린 채로

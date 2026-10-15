@@ -7,6 +7,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 from app.graph import build_graph
+from app.guard import mask_pii
 
 app = FastAPI(title="smart-ai")
 
@@ -32,7 +33,10 @@ class ChatRequest(BaseModel):
 
 @app.post("/internal/chat")
 def chat(req: ChatRequest, graph: Annotated[Any, Depends(get_graph)]) -> dict:
-    out = graph.invoke({"message": req.message}, {"configurable": {"thread_id": req.threadId}})
+    # 그래프 입력도 체크포인터에 저장되므로, 원문이 남지 않게 넣기 전에 가린다.
+    out = graph.invoke(
+        {"message": mask_pii(req.message)}, {"configurable": {"thread_id": req.threadId}}
+    )
     return {
         "success": True,
         "data": {"reply": out["reply"], "guard": out["guard"]},
