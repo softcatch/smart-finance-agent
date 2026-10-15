@@ -31,6 +31,15 @@ public class FakeAiServer implements AutoCloseable {
           calls.incrementAndGet();
           lastAuthorization = exchange.getRequestHeaders().getFirst("Authorization");
           lastBody = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+          // 실제 FastAPI(uvicorn)는 HTTP/2 업그레이드(Upgrade: h2c)가 붙은 POST를 400으로 거부한다.
+          // JDK HttpClient는 기본값이 HTTP/2라 이 헤더를 붙이므로, 호출하는 쪽이 HTTP/1.1이어야 통과한다.
+          if (exchange.getRequestHeaders().containsKey("Upgrade")) {
+            byte[] rejected = "Invalid HTTP request received.".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(400, rejected.length);
+            exchange.getResponseBody().write(rejected);
+            exchange.close();
+            return;
+          }
           try {
             Thread.sleep(delayMillis);
           } catch (InterruptedException ignored) {
