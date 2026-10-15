@@ -16,9 +16,9 @@ CREATE TABLE IF NOT EXISTS financial (
     reprt_code   VARCHAR(5)  NOT NULL,
     fs_div       VARCHAR(3)  NOT NULL,
     account_nm   VARCHAR(20) NOT NULL,
-    amount       BIGINT,
-    add_amount   BIGINT,
-    prev_amount  BIGINT,
+    amount       BIGINT,  -- 당기. 1분기·반기·3분기는 해당 분기 단독, 사업보고서는 연간
+    add_amount   BIGINT,  -- 당기 누적(사업보고서는 없음)
+    prev_amount  BIGINT,  -- 전기. 분기 보고서는 전년 동기, 사업보고서는 전년 연간
     rcept_no     VARCHAR(14),
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (stock_code, bsns_year, reprt_code, fs_div, account_nm)

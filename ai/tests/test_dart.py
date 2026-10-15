@@ -96,6 +96,17 @@ def test_누적_금액이_없는_행도_받는다():
     assert row["amount"] == 79_140_000_000_000
 
 
+def test_같은_계정이_두_번_오면_먼저_온_행만_둔다():
+    # 실제 응답: 삼성전자의 당기순이익(손실)이 한 재무제표에 두 번(ord 29, 61) 온다
+    first = _item("당기순이익(손실)", ord="29", thstrm_amount="8,222,878,000,000")
+    second = _item("당기순이익(손실)", ord="61", thstrm_amount="9,999,999")
+
+    rows = parse_financials([first, second])
+
+    assert len(rows) == 1
+    assert rows[0]["amount"] == 8_222_878_000_000
+
+
 def test_종목코드가_없는_행은_버린다():
     assert parse_financials([_item("매출액", stock_code=" ")]) == []
 

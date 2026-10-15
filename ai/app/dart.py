@@ -33,27 +33,32 @@ def _account(name: str) -> str | None:
     return None
 
 
+# 같은 계정이 한 재무제표에 두 번 오기도 한다(실제 응답: 당기순이익(손실)이 ord 29·61). 먼저 온 행만 둔다.
+# 값의 의미: 1분기·반기·3분기는 amount가 해당 분기 단독, add_amount가 누적, prev_amount가 전년 동기다.
+# 사업보고서는 amount가 연간이고 add_amount는 없다.
 def parse_financials(items: list[dict]) -> list[dict]:
-    rows = []
+    rows: dict[tuple, dict] = {}
     for item in items:
         account = _account(item.get("account_nm", ""))
         stock_code = (item.get("stock_code") or "").strip()
         if account is None or not stock_code:
             continue
-        rows.append(
+        key = (stock_code, int(item["bsns_year"]), item["reprt_code"], item["fs_div"], account)
+        rows.setdefault(
+            key,
             {
                 "stock_code": stock_code,
-                "bsns_year": int(item["bsns_year"]),
-                "reprt_code": item["reprt_code"],
-                "fs_div": item["fs_div"],
+                "bsns_year": key[1],
+                "reprt_code": key[2],
+                "fs_div": key[3],
                 "account_nm": account,
                 "amount": parse_amount(item.get("thstrm_amount")),
                 "add_amount": parse_amount(item.get("thstrm_add_amount")),
                 "prev_amount": parse_amount(item.get("frmtrm_amount")),
                 "rcept_no": item.get("rcept_no"),
-            }
+            },
         )
-    return rows
+    return list(rows.values())
 
 
 # 다중회사 주요계정. 오류는 HTTP 200으로 오고 status 필드에 담긴다(013은 아직 공시 전이라 빈 목록).
