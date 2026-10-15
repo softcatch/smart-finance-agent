@@ -40,6 +40,7 @@ SSH로 홈서버에 접속해 `docker pull` 후 `docker compose up -d`로 다시
 | Secret | `SSH_PORT` | `2222` |
 | Secret | `SSH_USER` | 서버 계정(docker 그룹 소속) |
 | Secret | `SSH_PRIVATE_KEY` | 배포 전용 개인키 파일 전체(`-----BEGIN`부터 `-----END`까지 줄바꿈 포함) |
+| Secret | `SSH_HOST_KEY` | 홈서버의 호스트 공개키 한 줄. 워크플로우는 이 키와 같은 서버에만 접속한다 |
 
 배포 전용 키는 새로 만든다.
 
@@ -48,6 +49,15 @@ ssh-keygen -t ed25519 -f deploy_key -N "" -C "github-actions-deploy"
 # deploy_key.pub  → 서버의 ~/.ssh/authorized_keys에 한 줄 추가
 # deploy_key      → SSH_PRIVATE_KEY에 붙여 넣은 뒤 로컬 파일은 지운다
 ```
+
+호스트 키는 서버에서 직접 꺼낸다(네트워크로 받으면 고정하는 의미가 없다).
+
+```bash
+cat /etc/ssh/ssh_host_ed25519_key.pub   # 한 줄 전체를 SSH_HOST_KEY에 붙여 넣는다
+```
+
+ed25519 파일이 없으면 같은 폴더의 `ssh_host_ecdsa_key.pub`·`ssh_host_rsa_key.pub` 중 하나를 쓴다.
+서버 OS를 다시 설치하는 등 호스트 키가 바뀌면 `SSH_HOST_KEY`도 새 값으로 바꾼다.
 
 ### 2. 서버 준비(한 번)
 
