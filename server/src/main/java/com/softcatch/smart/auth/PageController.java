@@ -25,4 +25,14 @@ class PageController {
   String accountsPage() {
     return "accounts";
   }
+
+  @GetMapping("/transfers")
+  String transfersPage() {
+    return "transfers";
+  }
+
+  @GetMapping("/aliases")
+  String aliasesPage() {
+    return "aliases";
+  }
 }

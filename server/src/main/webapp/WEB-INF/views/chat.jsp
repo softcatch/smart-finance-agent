@@ -3,6 +3,7 @@
 <html lang="ko">
 <head><meta charset="UTF-8"><title>채팅</title></head>
 <body>
+<%@ include file="nav.jspf" %>
 <h1>채팅</h1>
 <div id="log" style="white-space: pre-wrap"></div>
 <form id="chat-form">
@@ -10,7 +11,6 @@
   <button type="submit">전송</button>
 </form>
 <p id="msg"></p>
-<a href="/accounts">계좌</a>
 <script>
 const token = localStorage.getItem('accessToken');
 const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };

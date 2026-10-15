@@ -50,6 +50,14 @@ class LoginPageE2ETest {
     context.close();
   }
 
+  // 포함 파일(nav.jspf)은 인코딩을 따로 지정해야 한다 — 안 하면 한글이 깨져 보인다.
+  @Test
+  void 공용_메뉴의_글자가_한글로_보인다() {
+    page.navigate("http://localhost:" + port + "/login");
+
+    assertEquals("채팅 계좌 송금 내역 별칭", page.locator("nav").innerText().replaceAll("\\s+", " ").trim());
+  }
+
   @Test
   void 로그인_페이지가_실제_브라우저에_렌더링된다() {
     page.navigate("http://localhost:" + port + "/login");

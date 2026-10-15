@@ -3,6 +3,7 @@
 <html lang="ko">
 <head><meta charset="UTF-8"><title>계좌</title></head>
 <body>
+<%@ include file="nav.jspf" %>
 <h1>계좌</h1>
 <table id="accounts">
   <thead><tr><th>계좌번호</th><th>잔액</th><th>대표</th><th>충전</th></tr></thead>
@@ -14,7 +15,6 @@
   <button type="submit">개설</button>
 </form>
 <p id="msg"></p>
-<a href="/chat">채팅</a>
 <script>
 const token = localStorage.getItem('accessToken');
 const tbody = document.querySelector('#accounts tbody');
@@ -52,7 +52,29 @@ function row(account) {
   balance.className = 'balance';
   balance.textContent = won(account.balance);
   const primary = document.createElement('td');
-  primary.textContent = account.primary ? '대표' : '';
+  primary.className = 'primary';
+  if (account.primary) {
+    primary.textContent = '대표';
+  } else {
+    // 대표 계좌는 채팅 송금의 출금 계좌다. 처리 중에는 버튼을 막아 한 번만 보낸다.
+    const make = document.createElement('button');
+    make.className = 'make-primary';
+    make.textContent = '대표로 지정';
+    make.addEventListener('click', async () => {
+      make.disabled = true;
+      msg.textContent = '';
+      try {
+        const body = await call('PATCH', '/api/v1/accounts/' + account.accountId + '/primary', {});
+        if (body.success) load();
+        else msg.textContent = body.error.message;
+      } catch (err) {
+        msg.textContent = '서버에 연결할 수 없습니다.';
+      } finally {
+        make.disabled = false;
+      }
+    });
+    primary.appendChild(make);
+  }
 
   const amount = document.createElement('input');
   amount.type = 'number';
