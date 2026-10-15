@@ -26,6 +26,7 @@ jobs:
       - uses: actions/checkout@v7
 
       # 빌드에 시간을 쓰기 전에 값과 SSH 접속부터 확인한다.
+      # 서버 호스트 키는 Secrets에 고정한 값만 믿는다(접속해서 받아오지 않는다).
       - name: 서버 접속 준비
         env:
           DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
@@ -34,8 +35,9 @@ jobs:
           SSH_PORT: ${{ secrets.SSH_PORT }}
           SSH_USER: ${{ secrets.SSH_USER }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_HOST_KEY: ${{ secrets.SSH_HOST_KEY }}
         run: |
-          for name in DOCKERHUB_USERNAME DOCKERHUB_TOKEN SSH_HOST SSH_PORT SSH_USER SSH_PRIVATE_KEY; do
+          for name in DOCKERHUB_USERNAME DOCKERHUB_TOKEN SSH_HOST SSH_PORT SSH_USER SSH_PRIVATE_KEY SSH_HOST_KEY; do
             if [ -z "${!name}" ]; then
               echo "::error::$name 값이 비어 있습니다. README의 '배포' 절을 보고 Secrets·Variables에 넣어 주세요."
               exit 1
@@ -44,11 +46,8 @@ jobs:
           install -d -m 700 ~/.ssh
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p "$SSH_PORT" "$SSH_HOST" > ~/.ssh/known_hosts 2>/dev/null || true
-          if [ ! -s ~/.ssh/known_hosts ]; then
-            echo "::error::홈서버 SSH에 닿지 않습니다. SSH_HOST·SSH_PORT, 공유기 포트포워딩, 서버 방화벽을 확인하세요."
-            exit 1
-          fi
+          # 이 파일에는 고정한 키 하나뿐이라, 접속 주소·포트 표기와 상관없이 이 키와 같을 때만 믿는다.
+          printf '* %s\n' "$SSH_HOST_KEY" > ~/.ssh/known_hosts
           cat > ~/.ssh/config <<EOF
           Host homeserver
             HostName $SSH_HOST
@@ -56,10 +55,14 @@ jobs:
             User $SSH_USER
             IdentityFile ~/.ssh/deploy_key
             IdentitiesOnly yes
+            StrictHostKeyChecking yes
             BatchMode yes
             ConnectTimeout 15
           EOF
-          ssh homeserver true
+          if ! ssh homeserver true; then
+            echo "::error::홈서버 SSH 접속에 실패했습니다. 위 ssh 메시지와 함께 SSH_HOST·SSH_PORT, 공유기 포트포워딩, 서버 방화벽, SSH_HOST_KEY, SSH_USER·SSH_PRIVATE_KEY를 확인하세요."
+            exit 1
+          fi
 
       - id: tag
         run: echo "value=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
