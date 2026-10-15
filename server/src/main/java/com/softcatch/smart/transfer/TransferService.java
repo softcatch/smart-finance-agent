@@ -23,6 +23,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 class TransferService {
 
+  private static class PasswordMismatchException extends ApiException {
+    PasswordMismatchException() {
+      super(ErrorCode.ACCOUNT_PASSWORD_INVALID);
+    }
+  }
+
   private static final Duration REQUEST_TTL = Duration.ofMinutes(5);
   private static final int DEFAULT_PAGE_SIZE = 20;
 
@@ -99,7 +105,9 @@ class TransferService {
         .orElseThrow(() -> new ApiException(ErrorCode.ALIAS_NOT_FOUND));
   }
 
-  @Transactional
+  // 비밀번호가 틀리면 송금은 안 하되 요청ID는 폐기한다 — 사용 처리가 커밋되도록 이 예외만 롤백에서
+  // 뺀다. 다른 예외(잔액 부족 등)는 지금처럼 전부 롤백한다.
+  @Transactional(noRollbackFor = PasswordMismatchException.class)
   TransferConfirmResponse confirm(Long callerMemberId, String requestId, String password) {
     TransferRequest request =
         transferRequests
@@ -123,7 +131,7 @@ class TransferService {
 
     // 출금 계좌의 비밀번호를 확인한다. null은 빈 문자열로 보아 불일치로 처리한다.
     if (!passwordEncoder.matches(password == null ? "" : password, fromAccount.getPasswordHash())) {
-      throw new ApiException(ErrorCode.ACCOUNT_PASSWORD_INVALID);
+      throw new PasswordMismatchException();
     }
 
     Account toAccount =

@@ -365,6 +365,29 @@ class TransferControllerTest {
   }
 
   @Test
+  void 비밀번호가_틀리면_요청ID가_폐기되어_맞는_비밀번호로도_다시_쓸_수_없다() throws Exception {
+    MemberSession recipient = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "수취인10");
+    AccountInfo recipientAccount = openAccount(recipient.token());
+
+    MemberSession sender = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "발신자13");
+    AccountInfo senderAccount = openAccount(sender.token());
+    charge(sender.token(), senderAccount.accountId(), 50000L);
+    String requestId =
+        createTransferRequest(sender.token(), recipientAccount.accountNumber(), null, 10000L);
+
+    confirm(sender.token(), requestId, "0000")
+        .andExpect(MockMvcResultMatchers.status().isForbidden());
+
+    confirm(sender.token(), requestId, ACCOUNT_PASSWORD)
+        .andExpect(MockMvcResultMatchers.status().isConflict())
+        .andExpect(
+            MockMvcResultMatchers.jsonPath("$.error.code").value("TRANSFER_REQUEST_ALREADY_USED"));
+
+    Account senderAcc = accounts.findByAccountNumber(senderAccount.accountNumber()).orElseThrow();
+    Assertions.assertEquals(50000L, senderAcc.getBalance());
+  }
+
+  @Test
   void 동시_확정_후_성공은_1번만() throws Exception {
     MemberSession recipient = signupAndLogin("tf" + System.nanoTime(), "pw12345!", "수취인7");
     AccountInfo recipientAccount = openAccount(recipient.token());
