@@ -21,9 +21,7 @@ def health() -> dict[str, str]:
     return {"status": "UP"}
 
 
-# 처음 요청 때 만든다 — import 시점에 만들면 OPENAI_API_KEY 없는 CI·헬스 테스트가 깨진다.
-@lru_cache
-def get_graph():
+def make_llm() -> ChatOpenAI:
     # OpenAI 429는 재시도하지 않는다(SDK 기본 2회 재시도를 끈다).
     # gpt-5 계열은 추론 강도가 지연을 좌우한다. 같은 모델로 잰 값: 기본(medium)은 호출당 4~11초,
     # low는 약 2.7초, minimal은 약 1.2초다. minimal은 빠르지만 의도 추출을 자주 놓친다(13건 중 3건 —
@@ -31,8 +29,13 @@ def get_graph():
     # 추론을 쓰지 않는 모델은 이 인자를 거부하므로 OPENAI_REASONING_EFFORT를 비우면 뺀다.
     effort = os.getenv("OPENAI_REASONING_EFFORT", "low")
     options = {"reasoning_effort": effort} if effort else {}
-    llm = ChatOpenAI(model=os.getenv("OPENAI_MODEL") or "gpt-5-nano", max_retries=0, **options)
-    return build_graph(llm)
+    return ChatOpenAI(model=os.getenv("OPENAI_MODEL") or "gpt-5-nano", max_retries=0, **options)
+
+
+# 처음 요청 때 만든다 — import 시점에 만들면 OPENAI_API_KEY 없는 CI·헬스 테스트가 깨진다.
+@lru_cache
+def get_graph():
+    return build_graph(make_llm())
 
 
 # 재무 비교용 조회: 말한 기업 이름 → (찾은 기업, 못 찾은 이름, 회사별 재무 행). 요청마다 연결을 연다.
