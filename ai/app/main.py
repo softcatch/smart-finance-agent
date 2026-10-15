@@ -26,13 +26,13 @@ def get_graph():
 
 
 class ChatRequest(BaseModel):
-    threadId: str  # 이번엔 전달만 받는다(대화 맥락은 FR-015)
+    threadId: str  # 체크포인터의 thread_id — 같은 값이면 같은 대화(FR-015)
     message: str
 
 
 @app.post("/internal/chat")
 def chat(req: ChatRequest, graph: Annotated[Any, Depends(get_graph)]) -> dict:
-    out = graph.invoke({"message": req.message})
+    out = graph.invoke({"message": req.message}, {"configurable": {"thread_id": req.threadId}})
     return {
         "success": True,
         "data": {"reply": out["reply"], "guard": out["guard"]},
