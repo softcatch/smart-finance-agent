@@ -50,3 +50,11 @@ def test_0_이하_금액은_앞에서_말한_금액도_접는다():
 
 def test_빈_문자열은_말하지_않은_값으로_본다():
     assert merge({"amount": 5000}, _slots(alias="")) == {"amount": 5000}
+
+
+def test_내역_조회_값은_송금_진행_값에_섞이지_않는다():
+    slots = TransferSlots(
+        is_transfer=True, is_history=True, period="this_month", amount=10000, alias="엄마"
+    )
+
+    assert merge({}, slots) == {"amount": 10000, "alias": "엄마"}

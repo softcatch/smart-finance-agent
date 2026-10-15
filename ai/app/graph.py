@@ -7,15 +7,17 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from app.guard import is_injection, mask_pii
+from app.history import ASK_PERIOD, history_reply, period_range, today_kst
 from app.spring import RecipientNotFound
 from app.transfer import TransferSlots, ask_for, merge
 
 SYSTEM_PROMPT = "너는 SMART 금융 비서다. 사용자의 금융 질문에 한국어로 짧게 답한다."
 INJECTION_REPLY = "요청하신 내용은 처리할 수 없습니다."
 EXTRACT_PROMPT = (
-    "사용자 메시지에서 송금 정보를 뽑는다. 송금 요청이거나 아래 진행 중인 송금 정보를 이어서 "
-    "말하면 is_transfer=true. 말하지 않은 값은 null로 둔다. 금액은 원 단위 정수, 별칭은 들은 "
-    "그대로 쓴다.\n진행 중인 송금: {pending}"
+    "사용자 메시지에서 의도와 값을 뽑는다. 송금을 요청하거나 아래 진행 중인 송금 정보를 이어서 "
+    "말하면 is_transfer=true. 송금 내역이나 보낸·받은 금액을 묻는 질문이면 is_history=true이고, "
+    "기간이 오늘·이번 달·지난달·최근 7일 중 하나면 period에 넣는다. 말하지 않은 값은 null로 둔다. "
+    "금액은 원 단위 정수, 별칭은 들은 그대로 쓴다.\n진행 중인 송금: {pending}"
 )
 NOT_FOUND_REPLY = "계좌나 별칭을 찾을 수 없습니다. 받는 분의 계좌번호나 별칭을 다시 알려 주세요."
 
@@ -23,19 +25,22 @@ NOT_FOUND_REPLY = "계좌나 별칭을 찾을 수 없습니다. 받는 분의 �
 # messages: 이 대화의 사용자·AI 메시지 기록(LLM에 목록째 넘김). message는 이번 턴 입력.
 # pending: 진행 중인 송금 값(금액·수취인). 다 모여 요청을 만들면 비운다.
 # transfer_card: 이번 턴에 만든 확인 카드. 턴마다 비운다(이전 턴 카드가 남지 않게).
+# is_history·period: 이번 턴이 내역 조회인지와 조회 기간(오늘·이번 달·지난달·최근 7일).
 class ChatState(MessagesState, total=False):
     message: str
     reply: str
     guard: str
     is_transfer: bool
+    is_history: bool
+    period: str | None
     pending: dict
     transfer_card: dict | None
 
 
-# 입력 가드 → (인젝션이면 바로 종료) → 송금 값 추출 → 일반 답변 | 되묻기 | 송금 요청 생성.
+# 입력 가드 → (인젝션이면 바로 종료) → 의도·값 추출 → 일반 답변 | 되묻기 | 송금 요청 생성 | 내역 조회.
 # LLM·추출기를 인자로 받아 테스트에서 가짜를 넣는다. 추출기를 안 주면 llm의 구조화 출력을 쓴다.
 # 대화 기록은 체크포인터가 thread_id별로 들고 있다 — invoke할 때 config에 thread_id를 넘긴다.
-# 송금 요청 생성 함수는 config["configurable"]["create_transfer"]로 받는다(JWT를 쥔 함수).
+# Spring 호출 함수는 config["configurable"]의 create_transfer·get_history로 받는다(JWT를 쥔 함수).
 def build_graph(llm: BaseChatModel, extractor=None):
     extractor = extractor or llm.with_structured_output(TransferSlots)
 
@@ -49,9 +54,15 @@ def build_graph(llm: BaseChatModel, extractor=None):
         pending = state.get("pending") or {}
         prompt = EXTRACT_PROMPT.format(pending=json.dumps(pending, ensure_ascii=False))
         slots = extractor.invoke([SystemMessage(prompt), state["messages"][-1]])
-        if not slots.is_transfer:  # 송금이 아니면 진행 중이던 것도 접는다
-            return {"is_transfer": False, "pending": {}}
-        return {"is_transfer": True, "pending": merge(pending, slots)}
+        if slots.is_transfer:  # 송금이 내역 조회보다 우선한다
+            return {"is_transfer": True, "is_history": False, "pending": merge(pending, slots)}
+        # 송금이 아니면 진행 중이던 것도 접는다
+        return {
+            "is_transfer": False,
+            "is_history": slots.is_history,
+            "period": slots.period,
+            "pending": {},
+        }
 
     def answer(state: ChatState) -> ChatState:
         ai = llm.invoke([SystemMessage(SYSTEM_PROMPT), *state["messages"]])
@@ -80,10 +91,20 @@ def build_graph(llm: BaseChatModel, extractor=None):
             "reply": reply,
         }
 
+    def history(state: ChatState, config: RunnableConfig) -> ChatState:
+        period = state.get("period")
+        if period is None:  # 지원하지 않는 기간이면 조회하지 않고 가능한 기간을 안내한다
+            reply = ASK_PERIOD
+        else:
+            start, end = period_range(period, today_kst())
+            summary = config["configurable"]["get_history"](start, end)
+            reply = history_reply(period, start, end, summary)  # 숫자는 Spring 응답 값(NFR-002)
+        return {"messages": [AIMessage(reply)], "reply": reply}
+
     def after_extract(state: ChatState) -> str:
-        if not state["is_transfer"]:
-            return "answer"
-        return "ask" if ask_for(state["pending"]) else "create_request"
+        if state["is_transfer"]:
+            return "ask" if ask_for(state["pending"]) else "create_request"
+        return "history" if state["is_history"] else "answer"
 
     graph = StateGraph(ChatState)
     graph.add_node("input_guard", input_guard)
@@ -91,6 +112,7 @@ def build_graph(llm: BaseChatModel, extractor=None):
     graph.add_node("answer", answer)
     graph.add_node("ask", ask)
     graph.add_node("create_request", create_request)
+    graph.add_node("history", history)
     graph.add_edge(START, "input_guard")
     graph.add_conditional_edges(
         "input_guard", lambda state: END if state["guard"] == "INJECTION" else "extract"
@@ -99,5 +121,6 @@ def build_graph(llm: BaseChatModel, extractor=None):
     graph.add_edge("answer", END)
     graph.add_edge("ask", END)
     graph.add_edge("create_request", END)
+    graph.add_edge("history", END)
     # ponytail: 메모리 체크포인터 — 워커 1개 기준, 재시작하면 기록이 사라진다. 문제가 확인되면 PostgreSQL.
     return graph.compile(checkpointer=InMemorySaver())

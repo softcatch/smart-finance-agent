@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from app.graph import build_graph
 from app.guard import mask_pii
-from app.spring import create_transfer_request
+from app.spring import create_transfer_request, get_transfer_history
 
 app = FastAPI(title="smart-ai")
 
@@ -47,6 +47,7 @@ def chat(
             "configurable": {
                 "thread_id": req.threadId,
                 "create_transfer": partial(create_transfer_request, token),
+                "get_history": partial(get_transfer_history, token),
             }
         },
     )

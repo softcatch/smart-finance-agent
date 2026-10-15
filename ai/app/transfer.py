@@ -1,9 +1,17 @@
 from pydantic import BaseModel, Field
 
+from app.history import Period
 
-# LLM이 사용자 메시지에서 뽑는 송금 값. 말하지 않은 값은 None.
+
+# LLM이 사용자 메시지에서 뽑는 의도(송금·내역 조회)와 값. 말하지 않은 값은 None.
 class TransferSlots(BaseModel):
     is_transfer: bool = Field(description="송금 요청이거나, 진행 중인 송금 정보를 이어 말하면 true")
+    is_history: bool = Field(
+        default=False, description="송금 내역이나 보낸·받은 금액을 묻는 질문이면 true"
+    )
+    period: Period | None = Field(
+        default=None, description="내역을 조회할 기간. 해당하는 값이 없으면 null"
+    )
     amount: int | None = Field(default=None, description="금액(원 단위 정수). 말하지 않았으면 null")
     recipient_account_number: str | None = Field(
         default=None, description="수취인 계좌번호(숫자). 말하지 않았으면 null"
@@ -16,7 +24,9 @@ class TransferSlots(BaseModel):
 # 진행 중인 값(pending)에 이번에 말한 값을 합친다. 새로 말한 값이 이긴다.
 def merge(pending: dict, slots: TransferSlots) -> dict:
     got = {
-        k: v for k, v in slots.model_dump(exclude={"is_transfer"}).items() if v not in (None, "")
+        k: v
+        for k, v in slots.model_dump(exclude={"is_transfer", "is_history", "period"}).items()
+        if v not in (None, "")
     }
     merged = {**pending, **got}
     # 0 이하 금액은 쓸 수 없다 — 앞에서 말한 금액으로 되돌아가지 않고 다시 묻는다
