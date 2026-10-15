@@ -81,6 +81,39 @@ function addCard(card) {
   log.appendChild(box);
 }
 
+// 재무 비교 표(E-11 table). 값은 서버가 만든 문자열이라 textContent로만 넣는다.
+function addTable(t) {
+  const table = document.createElement('table');
+  table.className = 'fin-table';
+  table.border = '1';
+  const head = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  t.columns.forEach((text) => {
+    const th = document.createElement('th');
+    th.textContent = text;
+    headRow.appendChild(th);
+  });
+  head.appendChild(headRow);
+  const body = document.createElement('tbody');
+  t.rows.forEach((cells) => {
+    const tr = document.createElement('tr');
+    cells.forEach((text) => {
+      const td = document.createElement('td');
+      td.textContent = text;
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+  table.append(head, body);
+  log.appendChild(table);
+  if (t.note) {
+    const note = document.createElement('p');
+    note.className = 'fin-note';
+    note.textContent = t.note;
+    log.appendChild(note);
+  }
+}
+
 // 페이지를 열 때 새 대화를 만든다(FR-013). 전송은 이 약속이 끝난 뒤에 한다.
 const ready = call('/api/v1/chat/threads').then((body) => {
   if (!body.success) throw new Error(body.error.message);
@@ -102,6 +135,7 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
     if (body.success) {
       add('AI', body.data.reply);
       if (body.data.transferCard) addCard(body.data.transferCard);
+      if (body.data.table) addTable(body.data.table);
     } else {
       msg.textContent = body.error.message;
     }

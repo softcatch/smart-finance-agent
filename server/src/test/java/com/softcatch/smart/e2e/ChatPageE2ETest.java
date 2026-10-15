@@ -3,6 +3,7 @@ package com.softcatch.smart.e2e;
 import static com.microsoft.playwright.assertions.PlaywrightAssertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.microsoft.playwright.Locator;
 import com.softcatch.smart.TestcontainersConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -25,6 +26,26 @@ class ChatPageE2ETest extends E2ETestBase {
 
     assertThat(page.locator("#log")).containsText("나: 안녕");
     assertThat(page.locator("#log")).containsText("AI: 안녕하세요"); // 가짜 FastAPI의 기본 답변
+  }
+
+  @Test
+  void 재무_비교_표가_화면에_표로_보인다() {
+    signIn(signupAndLogin("표유저"));
+    FAKE_AI.responseBody =
+        "{\"success\":true,\"data\":{\"reply\":\"삼성전자 재무 비교입니다.\",\"guard\":\"PASS\","
+            + "\"table\":{\"columns\":[\"항목\",\"삼성전자\"],"
+            + "\"rows\":[[\"매출액\",\"791,405억원 (+10.0%)\"],[\"영업이익\",\"66,853억원 (+1.2%)\"]],"
+            + "\"note\":\"2026년 1분기 · 연결 기준\"}},\"error\":null}";
+
+    page.navigate(url("/chat"));
+    page.fill("input[name=message]", "삼성전자 실적 알려줘");
+    page.click("#chat-form button");
+
+    Locator table = page.locator(".fin-table");
+    assertThat(table.locator("thead th")).hasText(new String[] {"항목", "삼성전자"});
+    assertThat(table.locator("tbody tr")).hasCount(2);
+    assertThat(table.locator("tbody tr").nth(1)).containsText("66,853억원 (+1.2%)");
+    assertThat(page.locator(".fin-note")).hasText("2026년 1분기 · 연결 기준");
   }
 
   @Test

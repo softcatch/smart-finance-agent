@@ -1,11 +1,13 @@
 import json
 
+import psycopg
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 
+from app.financial import ASK_COMPANY, build_table
 from app.guard import is_injection, mask_pii
 from app.history import ASK_PERIOD, history_reply, period_range, today_kst
 from app.spring import RecipientNotFound
@@ -16,7 +18,9 @@ INJECTION_REPLY = "요청하신 내용은 처리할 수 없습니다."
 EXTRACT_PROMPT = (
     "사용자 메시지에서 의도와 값을 뽑는다. 송금을 요청하거나 아래 진행 중인 송금 정보를 이어서 "
     "말하면 is_transfer=true. 송금 내역이나 보낸·받은 금액을 묻는 질문이면 is_history=true이고, "
-    "기간이 오늘·이번 달·지난달·최근 7일 중 하나면 period에 넣는다. 말하지 않은 값은 null로 둔다. "
+    "기간이 오늘·이번 달·지난달·최근 7일 중 하나면 period에 넣는다. 기업의 매출액·영업이익·순이익 "
+    "같은 재무 실적을 묻거나 기업끼리 비교하면 is_financial=true이고 말한 기업 이름을 companies에 "
+    "말한 그대로 넣는다(회사 소개·사업 내용 질문은 해당하지 않는다). 말하지 않은 값은 null로 둔다. "
     "금액은 원 단위 정수, 별칭은 들은 그대로 쓴다.\n진행 중인 송금: {pending}"
 )
 NOT_FOUND_REPLY = "계좌나 별칭을 찾을 수 없습니다. 받는 분의 계좌번호나 별칭을 다시 알려 주세요."
@@ -26,6 +30,7 @@ NOT_FOUND_REPLY = "계좌나 별칭을 찾을 수 없습니다. 받는 분의 �
 # pending: 진행 중인 송금 값(금액·수취인). 다 모여 요청을 만들면 비운다.
 # transfer_card: 이번 턴에 만든 확인 카드. 턴마다 비운다(이전 턴 카드가 남지 않게).
 # is_history·period: 이번 턴이 내역 조회인지와 조회 기간(오늘·이번 달·지난달·최근 7일).
+# is_financial·companies: 이번 턴이 재무 비교인지와 말한 기업 이름. table: 이번 턴의 재무 비교 표(턴마다 비운다).
 class ChatState(MessagesState, total=False):
     message: str
     reply: str
@@ -33,34 +38,56 @@ class ChatState(MessagesState, total=False):
     is_transfer: bool
     is_history: bool
     period: str | None
+    is_financial: bool
+    companies: list[str]
     pending: dict
     transfer_card: dict | None
+    table: dict | None
 
 
-# 입력 가드 → (인젝션이면 바로 종료) → 의도·값 추출 → 일반 답변 | 되묻기 | 송금 요청 생성 | 내역 조회.
+# 입력 가드 → (인젝션이면 바로 종료) → 의도·값 추출 → 일반 답변 | 되묻기 | 송금 요청 생성 | 내역 조회 | 재무 비교.
 # LLM·추출기를 인자로 받아 테스트에서 가짜를 넣는다. 추출기를 안 주면 llm의 구조화 출력을 쓴다.
 # 대화 기록은 체크포인터가 thread_id별로 들고 있다 — invoke할 때 config에 thread_id를 넘긴다.
 # Spring 호출 함수는 config["configurable"]의 create_transfer·get_history로 받는다(JWT를 쥔 함수).
+# 재무 조회 함수는 compare_financials로 받는다(DB를 읽는 함수).
 def build_graph(llm: BaseChatModel, extractor=None):
     extractor = extractor or llm.with_structured_output(TransferSlots)
 
     def input_guard(state: ChatState) -> ChatState:
         message = mask_pii(state["message"])
         if is_injection(message):  # 막힌 문장은 기록에 안 넣는다
-            return {"reply": INJECTION_REPLY, "guard": "INJECTION", "transfer_card": None}
-        return {"messages": [HumanMessage(message)], "guard": "PASS", "transfer_card": None}
+            return {
+                "reply": INJECTION_REPLY,
+                "guard": "INJECTION",
+                "transfer_card": None,
+                "table": None,
+            }
+        return {
+            "messages": [HumanMessage(message)],
+            "guard": "PASS",
+            "transfer_card": None,
+            "table": None,
+        }
 
     def extract(state: ChatState) -> ChatState:
         pending = state.get("pending") or {}
         prompt = EXTRACT_PROMPT.format(pending=json.dumps(pending, ensure_ascii=False))
         slots = extractor.invoke([SystemMessage(prompt), state["messages"][-1]])
-        if slots.is_transfer:  # 송금이 내역 조회보다 우선한다
-            return {"is_transfer": True, "is_history": False, "pending": merge(pending, slots)}
+        if slots.is_transfer:  # 송금이 내역 조회·재무 비교보다 우선한다
+            return {
+                "is_transfer": True,
+                "is_history": False,
+                "is_financial": False,
+                "pending": merge(pending, slots),
+            }
         # 송금이 아니면 진행 중이던 것도 접는다
         return {
             "is_transfer": False,
             "is_history": slots.is_history,
             "period": slots.period,
+            "is_financial": slots.is_financial
+            and not slots.is_history,  # 내역 조회가 재무보다 우선
+            "companies": slots.companies,
             "pending": {},
         }
 
@@ -101,10 +128,36 @@ def build_graph(llm: BaseChatModel, extractor=None):
             reply = history_reply(period, start, end, summary)  # 숫자는 Spring 응답 값(NFR-002)
         return {"messages": [AIMessage(reply)], "reply": reply}
 
+    # 재무 비교: 기업을 찾고(조회 함수) 표는 코드가 만든다. 숫자는 LLM이 만들지 않는다(NFR-002).
+    def financial(state: ChatState, config: RunnableConfig) -> ChatState:
+        names = state.get("companies") or []
+        if not names:
+            return {"messages": [AIMessage(ASK_COMPANY)], "reply": ASK_COMPANY}
+        try:
+            companies, missing, rows = config["configurable"]["compare_financials"](names)
+        except psycopg.errors.UndefinedTable:  # 수집 전(DART 키가 없으면 테이블도 아직 없다)
+            reply = "재무 데이터가 아직 수집되지 않았습니다. 수집이 끝난 뒤 다시 물어봐 주세요."
+            return {"messages": [AIMessage(reply)], "reply": reply}
+        except psycopg.OperationalError:  # DB를 못 읽어도 채팅은 이어진다
+            reply = "재무 데이터를 지금 읽을 수 없습니다. 잠시 후 다시 시도해 주세요."
+            return {"messages": [AIMessage(reply)], "reply": reply}
+        table = build_table(companies, rows) if companies else None
+        if table:
+            reply = f"{', '.join(name for _, name in companies)}의 재무를 비교했습니다."
+            if missing:
+                reply += f" 찾지 못한 기업: {', '.join(missing)}"
+        elif companies:
+            reply = f"{', '.join(name for _, name in companies)}의 재무 데이터가 아직 수집되지 않았습니다."
+        else:
+            reply = f"수집 대상에서 찾지 못한 기업입니다: {', '.join(missing)}. 정식 기업명으로 다시 말씀해 주세요."
+        return {"messages": [AIMessage(reply)], "reply": reply, "table": table}
+
     def after_extract(state: ChatState) -> str:
         if state["is_transfer"]:
             return "ask" if ask_for(state["pending"]) else "create_request"
-        return "history" if state["is_history"] else "answer"
+        if state["is_history"]:
+            return "history"
+        return "financial" if state.get("is_financial") else "answer"
 
     graph = StateGraph(ChatState)
     graph.add_node("input_guard", input_guard)
@@ -113,6 +166,7 @@ def build_graph(llm: BaseChatModel, extractor=None):
     graph.add_node("ask", ask)
     graph.add_node("create_request", create_request)
     graph.add_node("history", history)
+    graph.add_node("financial", financial)
     graph.add_edge(START, "input_guard")
     graph.add_conditional_edges(
         "input_guard", lambda state: END if state["guard"] == "INJECTION" else "extract"
@@ -122,5 +176,6 @@ def build_graph(llm: BaseChatModel, extractor=None):
     graph.add_edge("ask", END)
     graph.add_edge("create_request", END)
     graph.add_edge("history", END)
+    graph.add_edge("financial", END)
     # ponytail: 메모리 체크포인터 — 워커 1개 기준, 재시작하면 기록이 사라진다. 문제가 확인되면 PostgreSQL.
     return graph.compile(checkpointer=InMemorySaver())

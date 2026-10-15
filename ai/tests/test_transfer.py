@@ -58,3 +58,15 @@ def test_내역_조회_값은_송금_진행_값에_섞이지_않는다():
     )
 
     assert merge({}, slots) == {"amount": 10000, "alias": "엄마"}
+
+
+def test_재무_비교_값은_송금_진행_값에_섞이지_않는다():
+    slots = TransferSlots(
+        is_transfer=True,
+        is_financial=True,
+        companies=["삼성전자", "SK하이닉스"],
+        amount=10000,
+        alias="엄마",
+    )
+
+    assert merge({}, slots) == {"amount": 10000, "alias": "엄마"}

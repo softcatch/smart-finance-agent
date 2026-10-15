@@ -37,6 +37,11 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5-nano}
       # 비우면(OPENAI_REASONING_EFFORT=) 추론 강도 인자를 빼서 추론을 안 쓰는 모델도 쓸 수 있다
       OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT-low}
+      # 재무 비교가 재무 테이블을 직접 읽는다(재무 수치는 FastAPI가 계산 — 개요 3절)
+      POSTGRES_HOST: db
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       SMART_SERVER_BASE_URL: http://server:8080
 
   # DART 재무 수집 스케줄러(하루 1회). API 서버와 같은 이미지에 명령만 다르다.

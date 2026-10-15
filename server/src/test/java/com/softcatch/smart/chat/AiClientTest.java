@@ -28,7 +28,7 @@ class AiClientTest {
   void 성공하면_reply와_guard를_돌려주고_JWT와_본문을_전달한다() {
     ChatMessageResponse res = client.chat("jwt-token", "th_1", "안녕");
 
-    Assertions.assertEquals(new ChatMessageResponse("안녕하세요", "PASS", null), res);
+    Assertions.assertEquals(new ChatMessageResponse("안녕하세요", "PASS", null, null), res);
     Assertions.assertEquals("Bearer jwt-token", fake.lastAuthorization);
     Assertions.assertEquals("{\"threadId\":\"th_1\",\"message\":\"안녕\"}", fake.lastBody);
   }
@@ -43,6 +43,18 @@ class AiClientTest {
     Assertions.assertEquals("tr_7f3a", res.transferCard().requestId());
     Assertions.assertEquals("김영희", res.transferCard().recipientName());
     Assertions.assertEquals(10000L, res.transferCard().amount());
+  }
+
+  @Test
+  void 표가_오면_table로_파싱한다() {
+    fake.responseBody =
+        "{\"success\":true,\"data\":{\"reply\":\"재무 비교입니다.\",\"guard\":\"PASS\",\"table\":{\"columns\":[\"항목\",\"삼성전자\",\"SK하이닉스\"],\"rows\":[[\"매출액\",\"791,405억원 (+10.0%)\",\"미공시\"],[\"영업이익\",\"66,853억원 (+1.2%)\",\"미공시\"]],\"note\":\"2026년 1분기 · 연결 기준\"}},\"error\":null}";
+
+    ChatMessageResponse res = client.chat("t", "th_1", "삼성전자 실적");
+
+    Assertions.assertEquals(java.util.List.of("항목", "삼성전자", "SK하이닉스"), res.table().columns());
+    Assertions.assertEquals("영업이익", res.table().rows().get(1).get(0));
+    Assertions.assertEquals("2026년 1분기 · 연결 기준", res.table().note());
   }
 
   @Test
