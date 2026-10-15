@@ -1,4 +1,5 @@
 import re
+import secrets
 
 # 안전 판정은 LLM이 아니라 파이썬 규칙으로 한다.
 _CARD = re.compile(r"(?<!\d)\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}(?!\d)")
@@ -18,3 +19,43 @@ def mask_pii(text: str) -> str:
 
 def is_injection(text: str) -> bool:
     return _INJECTION.search(text) is not None
+
+
+# 시스템 프롬프트에 심는 카나리 단어(NFR-018). 프로세스마다 새로 만들어 코드를 봐도 알 수 없다.
+# 답변에 나오면 프롬프트가 샌 것이다.
+CANARY = f"카나리-{secrets.token_hex(4)}"
+
+# 투자 권유 표현 목록(NFR-017). '자기주식 매수'·'비중 확대'처럼 공시에 나오는 말은 넣지 않는다.
+_ADVICE = (
+    "매수하세요",
+    "매수를 추천",
+    "매수 추천",
+    "매수하는 것이 좋",
+    "매도하세요",
+    "매도를 추천",
+    "매도하는 것이 좋",
+    "사세요",
+    "파세요",
+    "담으세요",
+    "투자하세요",
+    "투자를 추천",
+    "목표주가",
+    "목표 주가",
+    "수익을 보장",
+    "원금을 보장",
+    "반드시 오릅",
+    "반드시 오를",
+    "무조건 오릅",
+    "무조건 오를",
+    "확실히 오릅",
+    "확실히 오를",
+)
+
+
+# LLM이 쓴 답변이 나가기 전 판정. 걸린 판정 코드를 돌려주고, 통과면 "PASS".
+def check_output(reply: str) -> str:
+    if CANARY in reply:
+        return "PROMPT_LEAK"
+    if any(phrase in reply for phrase in _ADVICE):
+        return "ADVICE"
+    return "PASS"
