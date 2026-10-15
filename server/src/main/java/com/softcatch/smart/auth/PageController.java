@@ -15,4 +15,9 @@ class PageController {
   String signupPage() {
     return "signup";
   }
+
+  @GetMapping("/chat")
+  String chatPage() {
+    return "chat";
+  }
 }
