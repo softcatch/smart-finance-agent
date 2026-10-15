@@ -160,6 +160,10 @@ td button {
   color: var(--navy);
 }
 
+td input + button {
+  margin-left: 4px;
+}
+
 /* 채팅: 화면 높이를 꽉 채우고 대화 영역만 스크롤한다. 내 말풍선은 오른쪽 네이비, AI는 왼쪽 흰색 */
 body.chat {
   display: flex;
