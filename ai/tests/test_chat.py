@@ -6,6 +6,7 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
+from app.business import ASK_BUSINESS_COMPANY
 from app.financial import ASK_COMPANY
 from app.graph import INJECTION_REPLY, SYSTEM_PROMPT, build_graph
 from app.history import ASK_PERIOD
@@ -49,7 +50,13 @@ SUMMARY = {
 
 
 # create_transfer·get_history: Spring 호출 함수(JWT를 쥔 채로 요청마다 config에 넣는다)
-def _cfg(thread_id: str, create_transfer=None, get_history=None, compare_financials=None) -> dict:
+def _cfg(
+    thread_id: str,
+    create_transfer=None,
+    get_history=None,
+    compare_financials=None,
+    search_business=None,
+) -> dict:
     configurable = {"thread_id": thread_id}
     if create_transfer:
         configurable["create_transfer"] = create_transfer
@@ -57,6 +64,8 @@ def _cfg(thread_id: str, create_transfer=None, get_history=None, compare_financi
         configurable["get_history"] = get_history
     if compare_financials:
         configurable["compare_financials"] = compare_financials
+    if search_business:
+        configurable["search_business"] = search_business
     return {"configurable": configurable}
 
 
@@ -650,3 +659,191 @@ def test_엔드포인트는_표를_돌려주고_없으면_필드를_내리지_�
 
     assert first.json()["data"]["table"]["columns"] == ["항목", "삼성전자"]
     assert "table" not in second.json()["data"]
+
+
+def _chunk(content="TV와 반도체를 만듭니다.", section="1. 사업의 개요"):
+    return {
+        "section": section,
+        "content": content,
+        "report_nm": "반기보고서 (2026.06)",
+        "rcept_no": "20260814003699",
+    }
+
+
+def _search(found=(("005930", "삼성전자"),), missing=(), chunks=None):
+    # 검색 함수의 가짜: (찾은 기업, 못 찾은 이름, 종목코드별 청크). 받은 인자를 calls에 쌓는다.
+    calls = []
+    data = {"005930": [_chunk()]} if chunks is None else chunks
+
+    def search(names, question):
+        calls.append((names, question))
+        return list(found), list(missing), data
+
+    return search, calls
+
+
+def _business(*companies: str):
+    return _extractor(TransferSlots(is_transfer=False, is_business=True, companies=list(companies)))
+
+
+def test_사업_내용을_물으면_공시_본문만_근거로_요약하고_출처를_붙인다():
+    llm, seen = _spy()
+    search, calls = _search()
+    graph = build_graph(llm, _business("삼성전자"))
+
+    out = graph.invoke(
+        {"message": "삼성전자 사업 내용 알려줘"}, _cfg("th_1", search_business=search)
+    )
+
+    assert calls == [(["삼성전자"], "삼성전자 사업 내용 알려줘")]
+    system, *_, question = seen[0]
+    assert "<공시>" in system
+    assert "TV와 반도체를 만듭니다." in system
+    assert question == "삼성전자 사업 내용 알려줘"
+    assert out["reply"].startswith("답1\n\n출처\n- 삼성전자 반기보고서 (2026.06)")
+    assert "20260814003699" in out["reply"]
+    assert out["table"] is None
+    assert out["transfer_card"] is None
+
+
+def test_기업_이름이_없으면_되묻고_검색하지_않는다():
+    llm, seen = _spy()
+    search, calls = _search()
+    graph = build_graph(llm, _business())
+
+    out = graph.invoke({"message": "사업 내용 알려줘"}, _cfg("th_1", search_business=search))
+
+    assert out["reply"] == ASK_BUSINESS_COMPANY
+    assert calls == []
+    assert seen == []
+
+
+def test_못_찾은_기업만_말하면_이름을_알리고_LLM을_부르지_않는다():
+    llm, seen = _spy()
+    search, _ = _search(found=(), missing=("삼전",), chunks={})
+    graph = build_graph(llm, _business("삼전"))
+
+    out = graph.invoke({"message": "삼전 사업 내용"}, _cfg("th_1", search_business=search))
+
+    assert "삼전" in out["reply"]
+    assert "출처" not in out["reply"]
+    assert seen == []
+
+
+def test_수집이_안_된_기업은_안내하고_LLM을_부르지_않는다():
+    llm, seen = _spy()
+    search, _ = _search(chunks={"005930": []})
+    graph = build_graph(llm, _business("삼성전자"))
+
+    out = graph.invoke({"message": "삼성전자 사업 내용"}, _cfg("th_1", search_business=search))
+
+    assert out["reply"] == "삼성전자의 사업의 내용이 아직 수집되지 않았습니다."
+    assert seen == []
+
+
+def test_일부만_찾으면_찾은_기업으로_답하고_못_찾은_이름을_알린다():
+    llm, _ = _spy()
+    search, _ = _search(missing=("삼전자",))
+    graph = build_graph(llm, _business("삼성전자", "삼전자"))
+
+    out = graph.invoke({"message": "삼성전자랑 삼전자 사업"}, _cfg("th_1", search_business=search))
+
+    assert out["reply"].startswith("답1")
+    assert out["reply"].endswith("답변하지 못한 기업: 삼전자")
+
+
+def test_공시_본문은_대화_기록에_남지_않는다():
+    llm, seen = _spy()
+    search, _ = _search()
+    graph = build_graph(
+        llm,
+        _extractor(
+            TransferSlots(is_transfer=False, is_business=True, companies=["삼성전자"]),
+            TransferSlots(is_transfer=False),
+        ),
+    )
+    graph.invoke({"message": "삼성전자 사업 내용"}, _cfg("th_1", search_business=search))
+
+    graph.invoke({"message": "고마워"}, _cfg("th_1"))
+
+    assert all("TV와 반도체" not in m for m in seen[1])
+
+
+def test_재무와_사업이_함께_true면_재무가_우선이다():
+    graph = build_graph(
+        _spy()[0],
+        _extractor(
+            TransferSlots(
+                is_transfer=False, is_financial=True, is_business=True, companies=["삼성전자"]
+            )
+        ),
+    )
+
+    def search(names, question):
+        raise AssertionError("호출되면 안 됨")
+
+    out = graph.invoke(
+        {"message": "삼성전자 실적이랑 사업"},
+        _cfg("th_1", compare_financials=_finance(), search_business=search),
+    )
+
+    assert out["table"]["columns"] == ["항목", "삼성전자"]
+
+
+def test_송금과_사업이_함께_true면_송금이_우선이고_값에_섞이지_않는다():
+    graph = build_graph(
+        _spy()[0],
+        _extractor(TransferSlots(is_transfer=True, is_business=True, amount=10000)),
+    )
+
+    def search(names, question):
+        raise AssertionError("호출되면 안 됨")
+
+    out = graph.invoke({"message": "1만원 보낼래"}, _cfg("th_1", search_business=search))
+
+    assert out["pending"] == {"amount": 10000}  # is_business가 송금 값에 들어가지 않는다
+
+
+def test_사업의_내용을_읽지_못하면_안내하고_채팅은_이어진다():
+    llm, seen = _spy()
+    graph = build_graph(llm, _business("삼성전자"))
+
+    def search(names, question):
+        raise psycopg.OperationalError("connection refused")
+
+    out = graph.invoke({"message": "삼성전자 사업 내용"}, _cfg("th_1", search_business=search))
+
+    assert "읽을 수 없" in out["reply"]
+    assert seen == []
+
+
+def test_사업의_내용_테이블이_아직_없으면_미수집으로_안내한다():
+    llm, seen = _spy()
+    graph = build_graph(llm, _business("삼성전자"))
+
+    def search(names, question):
+        raise psycopg.errors.UndefinedTable('relation "company" does not exist')
+
+    out = graph.invoke({"message": "삼성전자 사업 내용"}, _cfg("th_1", search_business=search))
+
+    assert "수집" in out["reply"]
+    assert seen == []
+
+
+def test_엔드포인트는_출처가_붙은_답변을_돌려준다(monkeypatch):
+    search, calls = _search()
+    monkeypatch.setattr("app.main.search_business", search)
+    graph = build_graph(_spy()[0], _business("삼성전자"))
+    app.dependency_overrides[get_graph] = lambda: graph
+    try:
+        res = TestClient(app).post(
+            "/internal/chat", json={"threadId": "th_1", "message": "삼성전자 사업 내용"}
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    data = res.json()["data"]
+    assert data["reply"].startswith("답1\n\n출처\n")
+    assert data["guard"] == "PASS"
+    assert "table" not in data
+    assert calls == [(["삼성전자"], "삼성전자 사업 내용")]

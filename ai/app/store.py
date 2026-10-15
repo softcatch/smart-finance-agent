@@ -158,3 +158,17 @@ def replace_business_chunks(
         )
     conn.commit()
     return len(chunks)
+
+
+# 질문 벡터와 코사인 거리가 가까운 청크를 한 회사 안에서 limit개(FR-017). 인덱스 없이 그 회사 행만 훑는다.
+# 기본 5개는 평가 지표 Recall@5(NFR-039)와 맞춘 값이다. 청크가 없으면 빈 목록.
+def search_business_chunks(
+    conn: psycopg.Connection, stock_code: str, vector: list[float], limit: int = 5
+) -> list[dict]:
+    with conn.cursor(row_factory=psycopg.rows.dict_row) as cur:
+        cur.execute(
+            "SELECT section, content, report_nm, rcept_no FROM business_chunk "
+            "WHERE stock_code = %s ORDER BY embedding <=> %s::vector LIMIT %s",
+            (stock_code, str(vector), limit),
+        )
+        return cur.fetchall()

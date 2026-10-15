@@ -7,10 +7,11 @@ from fastapi import Depends, FastAPI, Header
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
+from app.business import embed_texts
 from app.graph import build_graph
 from app.guard import mask_pii
 from app.spring import create_transfer_request, get_transfer_history
-from app.store import find_companies, load_financials
+from app.store import find_companies, load_financials, search_business_chunks
 
 app = FastAPI(title="smart-ai")
 
@@ -38,18 +39,35 @@ def get_graph():
     return build_graph(make_llm())
 
 
-# 재무 비교용 조회: 말한 기업 이름 → (찾은 기업, 못 찾은 이름, 회사별 재무 행). 요청마다 연결을 연다.
-def compare_financials(names: list[str]):
-    with psycopg.connect(
+# 요청마다 연결을 연다.
+def _connect() -> psycopg.Connection:
+    return psycopg.connect(
         host=os.getenv("POSTGRES_HOST", "localhost"),
         dbname=os.getenv("POSTGRES_DB", "smart"),
         user=os.getenv("POSTGRES_USER", "smart"),
         password=os.getenv("POSTGRES_PASSWORD", ""),
         connect_timeout=5,
-    ) as conn:
+    )
+
+
+# 재무 비교용 조회: 말한 기업 이름 → (찾은 기업, 못 찾은 이름, 회사별 재무 행).
+def compare_financials(names: list[str]):
+    with _connect() as conn:
         companies, missing = find_companies(conn, names)
         rows = load_financials(conn, [stock for stock, _ in companies]) if companies else {}
     return companies, missing, rows
+
+
+# 사업의 내용 답변용 검색: 말한 기업 이름 + 질문 → (찾은 기업, 못 찾은 이름, 종목코드별 청크).
+# 질문은 기업을 찾은 뒤에만 임베딩한다(찾을 기업이 없으면 OpenAI를 부르지 않는다).
+def search_business(names: list[str], question: str):
+    with _connect() as conn:
+        companies, missing = find_companies(conn, names)
+        if not companies:
+            return companies, missing, {}
+        vector = embed_texts([question])[0]
+        chunks = {stock: search_business_chunks(conn, stock, vector) for stock, _ in companies}
+    return companies, missing, chunks
 
 
 class ChatRequest(BaseModel):
@@ -74,6 +92,7 @@ def chat(
                 "create_transfer": partial(create_transfer_request, token),
                 "get_history": partial(get_transfer_history, token),
                 "compare_financials": compare_financials,
+                "search_business": search_business,
             }
         },
     )
