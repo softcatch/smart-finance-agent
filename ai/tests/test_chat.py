@@ -1,10 +1,12 @@
 from datetime import date
 
+import psycopg
 from fastapi.testclient import TestClient
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
+from app.financial import ASK_COMPANY
 from app.graph import INJECTION_REPLY, SYSTEM_PROMPT, build_graph
 from app.history import ASK_PERIOD
 from app.main import app, get_graph
@@ -47,12 +49,14 @@ SUMMARY = {
 
 
 # create_transfer·get_history: Spring 호출 함수(JWT를 쥔 채로 요청마다 config에 넣는다)
-def _cfg(thread_id: str, create_transfer=None, get_history=None) -> dict:
+def _cfg(thread_id: str, create_transfer=None, get_history=None, compare_financials=None) -> dict:
     configurable = {"thread_id": thread_id}
     if create_transfer:
         configurable["create_transfer"] = create_transfer
     if get_history:
         configurable["get_history"] = get_history
+    if compare_financials:
+        configurable["compare_financials"] = compare_financials
     return {"configurable": configurable}
 
 
@@ -450,3 +454,183 @@ def test_엔드포인트_내역_조회는_JWT를_전달하고_카드를_내리�
     assert "transferCard" not in data
     assert calls == [("jwt-secret-2", date(2026, 9, 1), date(2026, 9, 30))]
     assert "jwt-secret-2" not in repr(vars(graph.checkpointer))  # JWT가 대화 기록에 없다
+
+
+def _fin(op=(6_685_272_000_000, 6_606_009_000_000)):
+    return [
+        {
+            "stock_code": "005930",
+            "bsns_year": 2026,
+            "reprt_code": "11013",
+            "fs_div": "CFS",
+            "account_nm": account,
+            "amount": amount,
+            "prev_amount": prev,
+        }
+        for account, (amount, prev) in (
+            ("매출액", (79_140_503_000_000, 71_915_601_000_000)),
+            ("영업이익", op),
+            ("당기순이익", (8_222_878_000_000, 6_754_708_000_000)),
+        )
+    ]
+
+
+def _finance(found=(("005930", "삼성전자"),), missing=()):
+    # 기업 조회 함수의 가짜: (찾은 기업, 못 찾은 이름, 회사별 재무 행)
+    return lambda names: (list(found), list(missing), {"005930": _fin()})
+
+
+def test_재무를_물으면_코드가_계산한_표로_답하고_LLM은_부르지_않는다():
+    llm, seen = _spy()
+    graph = build_graph(
+        llm,
+        _extractor(TransferSlots(is_transfer=False, is_financial=True, companies=["삼성전자"])),
+    )
+
+    out = graph.invoke(
+        {"message": "삼성전자 영업이익 알려줘"}, _cfg("th_1", compare_financials=_finance())
+    )
+
+    assert out["table"]["columns"] == ["항목", "삼성전자"]
+    assert out["table"]["rows"][1] == ["영업이익", "66,853억원 (+1.2%)"]
+    assert "삼성전자" in out["reply"]
+    assert out["transfer_card"] is None
+    assert seen == []  # 숫자를 LLM이 만들지 않는다
+
+
+def test_못_찾은_기업은_이름을_알려_주고_표를_만들지_않는다():
+    graph = build_graph(
+        _spy()[0],
+        _extractor(TransferSlots(is_transfer=False, is_financial=True, companies=["삼전"])),
+    )
+
+    out = graph.invoke(
+        {"message": "삼전 영업이익"},
+        _cfg("th_1", compare_financials=lambda names: ([], ["삼전"], {})),
+    )
+
+    assert out["table"] is None
+    assert "삼전" in out["reply"]
+
+
+def test_일부만_찾으면_찾은_기업으로_비교하고_못_찾은_이름을_알린다():
+    graph = build_graph(
+        _spy()[0],
+        _extractor(
+            TransferSlots(is_transfer=False, is_financial=True, companies=["삼성전자", "삼전자"])
+        ),
+    )
+
+    out = graph.invoke(
+        {"message": "삼성전자랑 삼전자 비교"},
+        _cfg("th_1", compare_financials=_finance(missing=["삼전자"])),
+    )
+
+    assert out["table"]["columns"] == ["항목", "삼성전자"]
+    assert "삼전자" in out["reply"]
+
+
+def test_기업_이름이_없으면_되묻고_조회하지_않는다():
+    graph = build_graph(
+        _spy()[0], _extractor(TransferSlots(is_transfer=False, is_financial=True, companies=[]))
+    )
+
+    def compare(names):
+        raise AssertionError("호출되면 안 됨")
+
+    out = graph.invoke({"message": "재무 비교해 줘"}, _cfg("th_1", compare_financials=compare))
+
+    assert out["reply"] == ASK_COMPANY
+    assert out["table"] is None
+
+
+def test_수집된_데이터가_없으면_없다고_답한다():
+    graph = build_graph(
+        _spy()[0],
+        _extractor(TransferSlots(is_transfer=False, is_financial=True, companies=["삼성전자"])),
+    )
+
+    out = graph.invoke(
+        {"message": "삼성전자 실적"},
+        _cfg(
+            "th_1",
+            compare_financials=lambda names: ([("005930", "삼성전자")], [], {"005930": []}),
+        ),
+    )
+
+    assert out["table"] is None
+    assert "수집" in out["reply"]
+
+
+def test_송금과_재무가_함께_true면_송금이_우선이다():
+    graph = build_graph(
+        _spy()[0],
+        _extractor(
+            TransferSlots(
+                is_transfer=True,
+                is_financial=True,
+                companies=["삼성전자"],
+                amount=10000,
+                alias="엄마",
+            )
+        ),
+    )
+
+    def compare(names):
+        raise AssertionError("호출되면 안 됨")
+
+    out = graph.invoke(
+        {"message": "엄마한테 1만원"},
+        _cfg("th_1", create_transfer=lambda pending: CARD, compare_financials=compare),
+    )
+
+    assert out["transfer_card"] == CARD
+    assert out["table"] is None
+
+
+def test_DB를_읽지_못하면_안내하고_채팅은_이어진다():
+    graph = build_graph(
+        _spy()[0],
+        _extractor(TransferSlots(is_transfer=False, is_financial=True, companies=["삼성전자"])),
+    )
+
+    def compare(names):
+        raise psycopg.OperationalError("connection refused")
+
+    out = graph.invoke({"message": "삼성전자 실적"}, _cfg("th_1", compare_financials=compare))
+
+    assert out["table"] is None
+    assert "읽을 수 없" in out["reply"]
+
+
+def test_표는_다음_턴에_남지_않는다():
+    graph = build_graph(
+        _spy()[0],
+        _extractor(TransferSlots(is_transfer=False, is_financial=True, companies=["삼성전자"])),
+    )
+    graph.invoke({"message": "삼성전자 실적"}, _cfg("th_1", compare_financials=_finance()))
+
+    out = graph.invoke({"message": "고마워"}, _cfg("th_1"))
+
+    assert out["table"] is None
+
+
+def test_엔드포인트는_표를_돌려주고_없으면_필드를_내리지_않는다(monkeypatch):
+    monkeypatch.setattr("app.main.compare_financials", _finance())
+    graph = build_graph(
+        _spy()[0],
+        _extractor(
+            TransferSlots(is_transfer=False, is_financial=True, companies=["삼성전자"]),
+            TransferSlots(is_transfer=False),
+        ),
+    )
+    app.dependency_overrides[get_graph] = lambda: graph
+    try:
+        client = TestClient(app)
+        first = client.post("/internal/chat", json={"threadId": "th_1", "message": "삼성전자 실적"})
+        second = client.post("/internal/chat", json={"threadId": "th_1", "message": "안녕"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert first.json()["data"]["table"]["columns"] == ["항목", "삼성전자"]
+    assert "table" not in second.json()["data"]

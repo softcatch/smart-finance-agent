@@ -2,6 +2,7 @@ import os
 from functools import lru_cache, partial
 from typing import Annotated, Any
 
+import psycopg
 from fastapi import Depends, FastAPI, Header
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
@@ -9,6 +10,7 @@ from pydantic import BaseModel
 from app.graph import build_graph
 from app.guard import mask_pii
 from app.spring import create_transfer_request, get_transfer_history
+from app.store import find_companies, load_financials
 
 app = FastAPI(title="smart-ai")
 
@@ -33,6 +35,20 @@ def get_graph():
     return build_graph(llm)
 
 
+# 재무 비교용 조회: 말한 기업 이름 → (찾은 기업, 못 찾은 이름, 회사별 재무 행). 요청마다 연결을 연다.
+def compare_financials(names: list[str]):
+    with psycopg.connect(
+        host=os.getenv("POSTGRES_HOST", "localhost"),
+        dbname=os.getenv("POSTGRES_DB", "smart"),
+        user=os.getenv("POSTGRES_USER", "smart"),
+        password=os.getenv("POSTGRES_PASSWORD", ""),
+        connect_timeout=5,
+    ) as conn:
+        companies, missing = find_companies(conn, names)
+        rows = load_financials(conn, [stock for stock, _ in companies]) if companies else {}
+    return companies, missing, rows
+
+
 class ChatRequest(BaseModel):
     threadId: str  # 체크포인터의 thread_id — 같은 값이면 같은 대화(FR-015)
     message: str
@@ -54,10 +70,13 @@ def chat(
                 "thread_id": req.threadId,
                 "create_transfer": partial(create_transfer_request, token),
                 "get_history": partial(get_transfer_history, token),
+                "compare_financials": compare_financials,
             }
         },
     )
     data = {"reply": out["reply"], "guard": out["guard"]}
     if out.get("transfer_card"):  # 확인 카드는 있을 때만(E-11)
         data["transferCard"] = out["transfer_card"]
+    if out.get("table"):  # 재무 비교 표도 있을 때만(E-11)
+        data["table"] = out["table"]
     return {"success": True, "data": data, "error": None}
