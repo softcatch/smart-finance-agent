@@ -4,6 +4,8 @@
 # 결과를 loadtest/results/<시각>/에 저장한다(k6.txt, summary.json, stats.csv). 끝난 뒤에도 환경은 남겨 둔다:
 #   docker compose -p smart-loadtest down -v
 # k6는 호스트에서 돈다(앱 제한 밖). 올리는 시간(WARMUP, 기본 30s)은 합격 판정에서 빼고, 같은 DB를 쓰지 않게 매번 새로 시작한다.
+# 모니터링(Prometheus·Grafana·exporter, NFR-036)도 함께 띄우고 k6 결과를 remote write로 보낸다 — 대시보드:
+#   http://localhost:3000 (로그인 없음). MONITOR=0 loadtest/run.sh ...는 모니터링 없이 돈다(오버헤드 비교용).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -15,7 +17,9 @@ mkdir -p "$OUT"
 DC="docker compose -p smart-loadtest -f compose.yaml -f loadtest/compose.yaml"
 
 $DC down -v --remove-orphans >/dev/null 2>&1 || true
-$DC up -d --build db server ai fake-llm
+SERVICES="db server ai fake-llm"
+[ "${MONITOR:-1}" = 1 ] && SERVICES="$SERVICES prometheus postgres-exporter cadvisor grafana"
+$DC up -d --build $SERVICES
 $DC --profile tools run --rm seed
 
 # 컨테이너별 CPU%·메모리를 3초마다 적는다(NFR-036 모니터링 전의 간단한 표본).
@@ -29,8 +33,18 @@ $DC --profile tools run --rm seed
 STATS=$!
 trap 'kill $STATS 2>/dev/null || true' EXIT
 
+K6_OUT=()
+if [ "${MONITOR:-1}" = 1 ]; then
+  until curl -sf localhost:9090/-/ready >/dev/null; do sleep 1; done
+  export K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write
+  export K6_PROMETHEUS_RW_TREND_STATS='p(95),p(99),avg,max'
+  export K6_PROMETHEUS_RW_PUSH_INTERVAL=5s
+  K6_OUT=(-o experimental-prometheus-rw)
+  echo "Grafana: http://localhost:3000"
+fi
+
 set +e
-k6 run -e TARGET_TPS="$TPS" -e DURATION="$DURATION" -e RUN_ID="$RUN_ID" \
+k6 run ${K6_OUT[@]+"${K6_OUT[@]}"} -e TARGET_TPS="$TPS" -e DURATION="$DURATION" -e RUN_ID="$RUN_ID" \
   --summary-export "$OUT/summary.json" loadtest/k6/scenario.js 2>&1 | tee "$OUT/k6.txt"
 CODE=${PIPESTATUS[0]}
 echo "결과: $OUT (k6 종료 코드 $CODE — 0이면 합격 기준을 모두 통과)"
