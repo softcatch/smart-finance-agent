@@ -1,6 +1,7 @@
 package com.softcatch.smart.e2e;
 
 import static com.microsoft.playwright.assertions.PlaywrightAssertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.softcatch.smart.TestcontainersConfiguration;
 import java.util.Map;
@@ -39,6 +40,22 @@ class DetailPageE2ETest extends E2ETestBase {
     assertThat(page.locator(".fin-table tbody tr").first()).containsText("791,405억원 (+10.0%)");
     assertThat(page.locator(".fin-note")).hasText("연결 기준");
     assertThat(page.locator("#msg")).hasText("");
+  }
+
+  @Test
+  void 상세_보기_화면도_공통_스타일을_쓴다() {
+    String token = signupAndLogin("상세스타일");
+    String detailId = issueDetail(token);
+    signIn(token);
+
+    page.navigate(url("/chat/details/" + detailId));
+
+    // smart.css가 적용돼야 본문 칸(main)의 최대 너비가 걸리고, 보고서는 줄바꿈을 유지한다
+    assertEquals(
+        "720px", page.evaluate("getComputedStyle(document.querySelector('main')).maxWidth"));
+    assertEquals(
+        "pre-wrap",
+        page.evaluate("getComputedStyle(document.querySelector('#report')).whiteSpace"));
   }
 
   @Test

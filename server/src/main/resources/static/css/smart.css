@@ -282,6 +282,12 @@ body.chat h1 {
   font-size: 12px;
 }
 
+/* 상세 보기 보고서: 줄바꿈을 그대로 보여 주고 표와 간격을 둔다 */
+.report {
+  margin-bottom: 24px;
+  white-space: pre-wrap;
+}
+
 .chat-head {
   display: flex;
   align-items: center;
