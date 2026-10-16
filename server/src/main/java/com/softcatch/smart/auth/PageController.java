@@ -21,6 +21,12 @@ class PageController {
     return "chat";
   }
 
+  // 상세 보기(FR-016). 채팅 화면의 [상세 보기]가 이 주소를 연다.
+  @GetMapping("/chat/details/{detailId}")
+  String detailPage() {
+    return "detail";
+  }
+
   @GetMapping("/accounts")
   String accountsPage() {
     return "accounts";

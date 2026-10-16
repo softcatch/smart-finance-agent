@@ -24,8 +24,10 @@ class FakeOpenAI:
 @pytest.fixture(autouse=True)
 def fake_openai(monkeypatch):
     monkeypatch.setattr(main, "ChatOpenAI", FakeOpenAI)
-    main.get_graph.cache_clear()  # lru_cache — 환경변수를 바꿔 가며 다시 만든다
+    main.get_llm.cache_clear()  # lru_cache — 환경변수를 바꿔 가며 다시 만든다
+    main.get_graph.cache_clear()
     yield
+    main.get_llm.cache_clear()
     main.get_graph.cache_clear()
 
 

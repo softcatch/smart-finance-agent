@@ -2,17 +2,32 @@ import os
 from functools import lru_cache, partial
 from time import perf_counter
 from typing import Annotated, Any
+from uuid import uuid4
 
 import psycopg
 from fastapi import BackgroundTasks, Depends, FastAPI, Header
+from fastapi.responses import JSONResponse
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
 from app.business import embed_texts
+from app.financial import (
+    NO_DATA_REPORT,
+    REPORT_UNVERIFIED,
+    build_detail_table,
+    write_report,
+)
 from app.graph import build_graph
-from app.guard import mask_pii
+from app.guard import OUTPUT_REPLIES, check_output, mask_pii, unverified_numbers
 from app.spring import create_transfer_request, get_transfer_history
-from app.store import find_companies, load_financials, search_business_chunks, write_chat_log
+from app.store import (
+    find_companies,
+    load_detail,
+    load_financials,
+    save_detail,
+    search_business_chunks,
+    write_chat_log,
+)
 
 app = FastAPI(title="smart-ai")
 
@@ -36,8 +51,13 @@ def make_llm() -> ChatOpenAI:
 
 # 처음 요청 때 만든다 — import 시점에 만들면 OPENAI_API_KEY 없는 CI·헬스 테스트가 깨진다.
 @lru_cache
+def get_llm():
+    return make_llm()
+
+
+@lru_cache
 def get_graph():
-    return build_graph(make_llm())
+    return build_graph(get_llm())
 
 
 # 요청마다 연결을 연다.
@@ -78,6 +98,17 @@ def log_chat(thread_id: str, guard: str, node_ms: dict[str, int]) -> None:
             write_chat_log(conn, thread_id, guard, node_ms)
     except psycopg.Error:
         pass
+
+
+# 상세 보기 ID(FR-016)를 발급하고 분석 조건을 저장한다. 저장에 실패하면 ID 없이 답한다(채팅은 이어진다).
+def issue_detail(detail: dict) -> str | None:
+    detail_id = f"dt_{uuid4().hex}"
+    try:
+        with _connect() as conn:
+            save_detail(conn, detail_id, detail["kind"], detail["stocks"])
+    except psycopg.Error:
+        return None
+    return detail_id
 
 
 class ChatRequest(BaseModel):
@@ -123,4 +154,36 @@ def chat(
         data["transferCard"] = out["transfer_card"]
     if out.get("table"):  # 재무 비교 표도 있을 때만(E-11)
         data["table"] = out["table"]
+    if out.get("detail") and (detail_id := issue_detail(out["detail"])):  # 분석 답변일 때만(E-11)
+        data["detailId"] = detail_id
     return {"success": True, "data": data, "error": None}
+
+
+# 상세 보기(I-02, FR-016): 클릭할 때 저장해 둔 분석 조건으로 전체 표와 보고서를 만든다.
+# 표는 코드가 계산하고, 보고서는 표의 값으로만 쓰며 출력 가드를 거친다. 걸리면 고정 문장이고 표는 그대로 준다.
+@app.get("/internal/details/{detail_id}")
+def detail(detail_id: str, llm: Annotated[Any, Depends(get_llm)]):
+    with _connect() as conn:
+        condition = load_detail(conn, detail_id)
+        if condition is None:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "data": None,
+                    "error": {
+                        "code": "DETAIL_NOT_FOUND",
+                        "message": "상세 보기 대상을 찾을 수 없습니다",
+                    },
+                },
+            )
+        companies, _ = find_companies(conn, condition["stock_codes"])
+        rows = load_financials(conn, [stock for stock, _ in companies])
+    table = build_detail_table(companies, rows)
+    if table is None:
+        return {"success": True, "data": {"report": NO_DATA_REPORT}, "error": None}
+    report, evidence = write_report(llm, table)
+    code = check_output(report, unverified_numbers(report, evidence))
+    if code != "PASS":  # 표에는 '아래 출처'가 없어 숫자 판정 문장만 표 기준으로 바꾼다
+        report = REPORT_UNVERIFIED if code == "NUMBER_UNVERIFIED" else OUTPUT_REPLIES[code]
+    return {"success": True, "data": {"report": report, "table": table}, "error": None}

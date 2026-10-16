@@ -23,6 +23,18 @@ public class FakeAiServer implements AutoCloseable {
   public volatile String lastBody;
   public final AtomicInteger calls = new AtomicInteger();
 
+  // 상세 보기(I-02): GET /internal/details/{detailId}
+  public static final String DETAIL_BODY =
+      "{\"success\":true,\"data\":{\"report\":\"보고서입니다\",\"table\":{\"columns\":[\"기간\",\"항목\",\"삼성전자\"],"
+          + "\"rows\":[[\"2026년 1분기\",\"매출액\",\"791,405억원 (+10.0%)\"]],\"note\":\"연결 기준\"}},"
+          + "\"error\":null}";
+  public volatile int detailStatus = 200;
+  public volatile String detailBody = DETAIL_BODY;
+  public volatile long detailDelayMillis = 0;
+  public volatile String lastDetailPath;
+  public volatile String lastDetailAuthorization;
+  public final AtomicInteger detailCalls = new AtomicInteger();
+
   public FakeAiServer() throws IOException {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext(
@@ -51,6 +63,23 @@ public class FakeAiServer implements AutoCloseable {
           exchange.getResponseBody().write(out);
           exchange.close();
         });
+    server.createContext(
+        "/internal/details",
+        exchange -> {
+          detailCalls.incrementAndGet();
+          lastDetailPath = exchange.getRequestURI().getPath();
+          lastDetailAuthorization = exchange.getRequestHeaders().getFirst("Authorization");
+          try {
+            Thread.sleep(detailDelayMillis);
+          } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+          }
+          byte[] out = detailBody.getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().add("Content-Type", "application/json");
+          exchange.sendResponseHeaders(detailStatus, out.length);
+          exchange.getResponseBody().write(out);
+          exchange.close();
+        });
     server.setExecutor(executor);
     server.start();
   }
@@ -62,6 +91,12 @@ public class FakeAiServer implements AutoCloseable {
     calls.set(0);
     lastAuthorization = null;
     lastBody = null;
+    detailStatus = 200;
+    detailBody = DETAIL_BODY;
+    detailDelayMillis = 0;
+    detailCalls.set(0);
+    lastDetailPath = null;
+    lastDetailAuthorization = null;
   }
 
   public String baseUrl() {

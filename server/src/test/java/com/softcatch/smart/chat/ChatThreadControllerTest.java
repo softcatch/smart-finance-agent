@@ -45,6 +45,7 @@ class ChatThreadControllerTest {
   static void aiProperties(DynamicPropertyRegistry registry) {
     registry.add("smart.ai.base-url", FAKE_AI::baseUrl);
     registry.add("smart.ai.read-timeout", () -> "1s");
+    registry.add("smart.ai.detail-read-timeout", () -> "1s");
   }
 
   @AfterAll
@@ -54,6 +55,7 @@ class ChatThreadControllerTest {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ChatThreadRepository chatThreads;
+  @Autowired private ChatDetailRepository chatDetails;
   private final ObjectMapper json = new ObjectMapper();
 
   @BeforeEach
@@ -173,6 +175,41 @@ class ChatThreadControllerTest {
   }
 
   @Test
+  void 상세_보기_ID가_오면_그대로_전달하고_본인_것으로_기록한다() throws Exception {
+    String detailId = "dt_" + System.nanoTime();
+    FAKE_AI.responseBody =
+        "{\"success\":true,\"data\":{\"reply\":\"재무 비교입니다.\",\"guard\":\"PASS\",\"detailId\":\""
+            + detailId
+            + "\"},\"error\":null}";
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "채팅상세");
+    String threadId = createThread(session.token());
+
+    sendMessage(session.token(), threadId)
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.detailId").value(detailId));
+
+    Assertions.assertEquals(
+        session.memberId(), chatDetails.findByDetailId(detailId).orElseThrow().getMemberId());
+  }
+
+  @Test
+  void 상세_보기_ID가_없으면_detailId_필드를_내리지_않고_기록하지_않는다() throws Exception {
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "채팅무상세");
+    String threadId = createThread(session.token());
+    long before = chatDetails.count();
+
+    String body =
+        sendMessage(session.token(), threadId)
+            .andExpect(MockMvcResultMatchers.status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    Assertions.assertFalse(body.contains("detailId"), body);
+    Assertions.assertEquals(before, chatDetails.count());
+  }
+
+  @Test
   void 남의_스레드면_404_THREAD_NOT_FOUND이고_FastAPI를_부르지_않는다() throws Exception {
     MemberSession owner = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "주인");
     MemberSession other = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "타인");
@@ -239,6 +276,116 @@ class ChatThreadControllerTest {
         .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("RATE_LIMITED"));
 
     Assertions.assertEquals(ChatRateLimiter.LIMIT, FAKE_AI.calls.get()); // 제한 초과분은 FastAPI로 안 간다
+  }
+
+  @Test
+  void 상세_보기는_본인_것이면_보고서와_표를_돌려주고_JWT를_전달한다() throws Exception {
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "상세1");
+    String detailId = ownedDetail(session);
+
+    getDetail(session.token(), detailId)
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.detailId").value(detailId))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.report").value("보고서입니다"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.table.columns[2]").value("삼성전자"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.table.note").value("연결 기준"));
+
+    Assertions.assertEquals("/internal/details/" + detailId, FAKE_AI.lastDetailPath);
+    Assertions.assertEquals("Bearer " + session.token(), FAKE_AI.lastDetailAuthorization);
+  }
+
+  @Test
+  void 상세_보기에서_표가_없으면_table_필드를_내리지_않는다() throws Exception {
+    FAKE_AI.detailBody = "{\"success\":true,\"data\":{\"report\":\"수집 전입니다\"},\"error\":null}";
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "상세2");
+
+    String body =
+        getDetail(session.token(), ownedDetail(session))
+            .andExpect(MockMvcResultMatchers.status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    Assertions.assertFalse(body.contains("table"), body);
+  }
+
+  @Test
+  void 남의_상세_보기는_404_DETAIL_NOT_FOUND이고_FastAPI를_부르지_않는다() throws Exception {
+    MemberSession owner = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "상세주인");
+    MemberSession other = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "상세타인");
+    String detailId = ownedDetail(owner);
+
+    getDetail(other.token(), detailId)
+        .andExpect(MockMvcResultMatchers.status().isNotFound())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("DETAIL_NOT_FOUND"));
+
+    Assertions.assertEquals(0, FAKE_AI.detailCalls.get());
+  }
+
+  @Test
+  void 없는_상세_보기는_404_DETAIL_NOT_FOUND() throws Exception {
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "상세3");
+
+    getDetail(session.token(), "dt_없는ID")
+        .andExpect(MockMvcResultMatchers.status().isNotFound())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("DETAIL_NOT_FOUND"));
+  }
+
+  @Test
+  void 상세_보기는_인증_없으면_401() throws Exception {
+    mockMvc
+        .perform(MockMvcRequestBuilders.get("/api/v1/chat/details/dt_1"))
+        .andExpect(MockMvcResultMatchers.status().isUnauthorized());
+  }
+
+  @Test
+  void FastAPI가_모르는_상세_보기면_404_DETAIL_NOT_FOUND() throws Exception {
+    FAKE_AI.detailStatus = 404;
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "상세4");
+
+    getDetail(session.token(), ownedDetail(session))
+        .andExpect(MockMvcResultMatchers.status().isNotFound())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("DETAIL_NOT_FOUND"));
+  }
+
+  @Test
+  void 상세_보기에서_FastAPI가_5xx거나_느리면_503_AI_SERVER_UNAVAILABLE() throws Exception {
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "상세5");
+    String detailId = ownedDetail(session);
+
+    FAKE_AI.detailStatus = 500;
+    getDetail(session.token(), detailId)
+        .andExpect(MockMvcResultMatchers.status().isServiceUnavailable())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("AI_SERVER_UNAVAILABLE"));
+
+    FAKE_AI.detailStatus = 200;
+    FAKE_AI.detailDelayMillis = 3000;
+    getDetail(session.token(), detailId)
+        .andExpect(MockMvcResultMatchers.status().isServiceUnavailable())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("AI_SERVER_UNAVAILABLE"));
+  }
+
+  @Test
+  void 채팅이_장애여도_이미_발급된_상세_보기는_열린다() throws Exception {
+    // 채팅 호출(/internal/chat)이 5xx여도 상세 보기 호출(/internal/details)은 별개 경로다.
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "상세6");
+    String detailId = ownedDetail(session);
+    FAKE_AI.status = 500;
+
+    getDetail(session.token(), detailId).andExpect(MockMvcResultMatchers.status().isOk());
+  }
+
+  // 채팅 응답으로 발급된 상세 보기 ID를 본인 것으로 만든다(FAKE_AI가 detailId가 든 응답을 준다).
+  private String ownedDetail(MemberSession session) throws Exception {
+    String detailId = "dt_" + System.nanoTime();
+    chatDetails.save(new ChatDetail(detailId, session.memberId()));
+    return detailId;
+  }
+
+  private ResultActions getDetail(String token, String detailId) throws Exception {
+    return mockMvc.perform(
+        MockMvcRequestBuilders.get("/api/v1/chat/details/" + detailId)
+            .header("Authorization", "Bearer " + token));
   }
 
   private ResultActions sendMessage(String token, String threadId) throws Exception {

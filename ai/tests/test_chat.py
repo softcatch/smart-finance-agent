@@ -1050,3 +1050,87 @@ def test_로그에는_메시지_본문이_들어가지_않는다(monkeypatch):
     _post("카드 1234-5678-9012-3456 확인해줘", build_graph(_says("네")[0], _plain()))
 
     assert "1234" not in repr(calls)
+
+
+def test_재무_비교_표가_나가면_상세_보기_조건이_따라온다():
+    graph = build_graph(
+        _spy()[0],
+        _extractor(TransferSlots(is_transfer=False, is_financial=True, companies=["삼성전자"])),
+    )
+
+    out = graph.invoke({"message": "삼성전자 실적"}, _cfg("th_1", compare_financials=_finance()))
+
+    assert out["detail"] == {"kind": "financial", "stocks": ["005930"]}
+
+
+def test_표가_없으면_상세_보기_조건도_없다():
+    graph = build_graph(
+        _spy()[0],
+        _extractor(TransferSlots(is_transfer=False, is_financial=True, companies=["삼전"])),
+    )
+
+    out = graph.invoke(
+        {"message": "삼전 실적"},
+        _cfg("th_1", compare_financials=lambda names: ([], ["삼전"], {})),
+    )
+
+    assert out["detail"] is None
+
+
+def test_상세_보기_조건은_다음_턴에_남지_않는다():
+    graph = build_graph(
+        _spy()[0],
+        _extractor(
+            TransferSlots(is_transfer=False, is_financial=True, companies=["삼성전자"]),
+            TransferSlots(is_transfer=False),
+        ),
+    )
+    graph.invoke({"message": "삼성전자 실적"}, _cfg("th_1", compare_financials=_finance()))
+
+    out = graph.invoke({"message": "고마워"}, _cfg("th_1"))
+
+    assert out["detail"] is None
+
+
+def test_엔드포인트는_재무_비교_답변에_상세_보기_ID를_발급하고_조건을_저장한다(
+    conn, database_url, monkeypatch
+):
+    monkeypatch.setattr("app.main._connect", lambda: psycopg.connect(database_url))
+    monkeypatch.setattr("app.main.compare_financials", _finance())
+    graph = build_graph(
+        _spy()[0],
+        _extractor(TransferSlots(is_transfer=False, is_financial=True, companies=["삼성전자"])),
+    )
+
+    res = _post("삼성전자 실적", graph)
+
+    detail_id = res.json()["data"]["detailId"]
+    assert detail_id.startswith("dt_")
+    assert conn.execute(
+        "SELECT kind, stock_codes FROM detail_condition WHERE detail_id = %s", (detail_id,)
+    ).fetchone() == ("financial", ["005930"])
+
+
+def test_재무_비교가_아닌_답변에는_상세_보기_ID가_없다(conn, database_url, monkeypatch):
+    monkeypatch.setattr("app.main._connect", lambda: psycopg.connect(database_url))
+    graph = build_graph(_says("안녕하세요")[0], _plain())
+
+    res = _post("안녕", graph)
+
+    assert "detailId" not in res.json()["data"]
+    assert conn.execute("SELECT count(*) FROM detail_condition").fetchone() == (0,)
+
+
+def test_조건을_저장하지_못해도_답변과_표는_나간다(monkeypatch):
+    # _connect는 conftest가 기본으로 막아 둔다 — 저장 실패와 같다
+    monkeypatch.setattr("app.main.compare_financials", _finance())
+    graph = build_graph(
+        _spy()[0],
+        _extractor(TransferSlots(is_transfer=False, is_financial=True, companies=["삼성전자"])),
+    )
+
+    res = _post("삼성전자 실적", graph)
+
+    data = res.json()["data"]
+    assert data["table"]["columns"] == ["항목", "삼성전자"]
+    assert "detailId" not in data
