@@ -28,7 +28,6 @@ from app.store import find_companies, load_financials, search_business_chunks
 from app.transfer import TransferSlots
 
 OUT = Path(__file__).resolve().parent.parent / "loadtest" / "latency.json"
-BUSINESS_CASES = Path(__file__).with_name("business_numbers.jsonl")
 SAMPLES = 30  # 호출 종류마다
 WORKERS = 4
 
@@ -50,6 +49,25 @@ ANSWER_MESSAGES = [
     "ETF가 뭐야?",
     "주식 시장은 몇 시에 열려?",
     "복리가 뭐야?",
+]
+# 사업의 내용 질문은 부하 시나리오와 같은 일반 질문 꼴만 쓴다(숫자 질문은 환각 평가 몫이고, 요약이 짧아 더 빠르다).
+GENERIC_BUSINESS = [
+    "{} 사업 내용 알려줘",
+    "{} 주요 제품이 뭐야?",
+    "{} 사업 구조 알려줘",
+    "{} 회사 소개해줘",
+]
+GENERIC_COMPANIES = [
+    "삼성전자",
+    "SK하이닉스",
+    "현대자동차",
+    "기아",
+    "현대모비스",
+    "LG에너지솔루션",
+    "삼성SDI",
+    "NAVER",
+    "카카오",
+    "한국전력공사",
 ]
 REPORT_STOCKS = [
     ["005930", "000660"],
@@ -87,7 +105,11 @@ def main() -> None:
     llm = make_llm()
     extractor = llm.with_structured_output(TransferSlots)
     extract_prompt = EXTRACT_PROMPT.format(pending="{}")
-    cases = [json.loads(x) for x in BUSINESS_CASES.read_text(encoding="utf-8").splitlines()]
+    cases = [
+        {"company": company, "question": template.format(company)}
+        for template in GENERIC_BUSINESS
+        for company in GENERIC_COMPANIES
+    ]
 
     # 사업의 내용 답변·보고서의 입력은 시간을 재기 전에 만든다(검색·표 계산은 재지 않는다).
     business_inputs = []
