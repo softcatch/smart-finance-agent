@@ -662,6 +662,99 @@ def test_엔드포인트는_표를_돌려주고_없으면_필드를_내리지_�
     assert "table" not in second.json()["data"]
 
 
+# 경쟁사 비교용 조회 함수의 가짜: 이름이든 종목코드든 아는 기업을 찾고, 호출 인자를 calls에 쌓는다.
+_COMPANIES = (
+    ("005930", "삼성전자"),
+    ("000660", "SK하이닉스"),
+    ("005380", "현대차"),
+    ("000270", "기아"),
+    ("012330", "현대모비스"),
+    ("015760", "한국전력"),
+)
+KNOWN = {key: company for company in _COMPANIES for key in company}
+
+
+def _known(calls: list):
+    def compare(names):
+        calls.append(list(names))
+        found: list = []
+        missing = []
+        for name in names:
+            company = KNOWN.get(name)
+            if company is None:
+                missing.append(name)
+            elif company not in found:
+                found.append(company)
+        return found, missing, {stock: _fin() for stock, _ in found}
+
+    return compare
+
+
+def _ask_finance(message: str, companies: list[str], calls: list):
+    graph = build_graph(
+        _spy()[0],
+        _extractor(TransferSlots(is_transfer=False, is_financial=True, companies=companies)),
+    )
+    return graph.invoke({"message": message}, _cfg("th_1", compare_financials=_known(calls)))
+
+
+def test_기업_하나와_경쟁사를_말하면_같은_업종의_경쟁사를_더해_비교한다():
+    calls: list = []
+
+    out = _ask_finance("삼성전자 경쟁사랑 비교해줘", ["삼성전자"], calls)
+
+    assert calls == [["삼성전자"], ["005930", "000660"]]
+    assert out["table"]["columns"] == ["항목", "삼성전자", "SK하이닉스"]
+    assert "반도체 목록" in out["reply"]
+    assert out["detail"] == {"kind": "financial", "stocks": ["005930", "000660"]}
+
+
+def test_업종에_세_곳이_있으면_질문한_기업을_포함해_세_곳을_비교한다():
+    out = _ask_finance("현대차 경쟁사 실적", ["현대차"], [])
+
+    assert out["table"]["columns"] == ["항목", "현대차", "기아", "현대모비스"]
+
+
+def test_기업을_둘_이상_말하면_경쟁사를_더하지_않는다():
+    calls: list = []
+
+    out = _ask_finance("삼성전자랑 현대차 경쟁사 비교", ["삼성전자", "현대차"], calls)
+
+    assert calls == [["삼성전자", "현대차"]]
+    assert out["table"]["columns"] == ["항목", "삼성전자", "현대차"]
+    assert "경쟁사는" not in out["reply"]
+
+
+def test_경쟁이라는_말이_없으면_말한_기업만_비교한다():
+    calls: list = []
+
+    out = _ask_finance("삼성전자 실적", ["삼성전자"], calls)
+
+    assert calls == [["삼성전자"]]
+    assert out["table"]["columns"] == ["항목", "삼성전자"]
+
+
+def test_경쟁사_목록에_없는_기업은_직접_말하라고_안내하고_그_기업의_표는_보여_준다():
+    calls: list = []
+
+    out = _ask_finance("한국전력 경쟁사 비교", ["한국전력"], calls)
+
+    assert calls == [["한국전력"]]
+    assert out["table"]["columns"] == ["항목", "한국전력"]
+    assert "직접 말씀해" in out["reply"]
+
+
+def test_한_번에_세_곳을_넘으면_앞의_세_곳만_비교하고_제외한_기업을_알린다():
+    out = _ask_finance(
+        "삼성전자 SK하이닉스 현대차 기아 비교", ["삼성전자", "SK하이닉스", "현대차", "기아"], []
+    )
+
+    assert out["table"]["columns"] == ["항목", "삼성전자", "SK하이닉스", "현대차"]
+    assert "최대 3곳" in out["reply"]
+    assert "제외한 기업: 기아" in out["reply"]
+    assert out["detail"]["stocks"] == ["005930", "000660", "005380"]
+
+
 def _chunk(content="TV와 반도체를 만듭니다.", section="1. 사업의 개요"):
     return {
         "section": section,
