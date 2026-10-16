@@ -1,9 +1,15 @@
 <%@ page contentType="text/html;charset=UTF-8" isELIgnored="true" %>
 <!DOCTYPE html>
 <html lang="ko">
-<head><meta charset="UTF-8"><title>송금 내역</title></head>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>송금 내역</title>
+<link rel="stylesheet" href="/css/smart.css">
+</head>
 <body>
 <%@ include file="nav.jspf" %>
+<main>
 <h1>송금 내역</h1>
 <table id="transfers">
   <thead><tr><th>일시</th><th>구분</th><th>상대</th><th>금액</th></tr></thead>
@@ -11,6 +17,7 @@
 </table>
 <div id="sentinel" style="height: 1px"></div>
 <p id="msg"></p>
+</main>
 <script>
 const token = localStorage.getItem('accessToken');
 const tbody = document.querySelector('#transfers tbody');

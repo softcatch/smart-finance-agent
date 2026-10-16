@@ -1,7 +1,28 @@
 <%@ page pageEncoding="UTF-8" %>
-<nav>
-  <a href="/chat">채팅</a>
-  <a href="/accounts">계좌</a>
-  <a href="/transfers">송금 내역</a>
-  <a href="/aliases">별칭</a>
-</nav>
+<header>
+  <nav>
+    <a href="/chat">채팅</a>
+    <a href="/accounts">계좌</a>
+    <a href="/transfers">송금 내역</a>
+    <a href="/aliases">별칭</a>
+  </nav>
+  <button id="logout" type="button" hidden>로그아웃</button>
+</header>
+<script>
+// 화면 스크립트와 이름이 겹치지 않게 함수로 감싼다.
+(() => {
+  // 지금 보는 메뉴를 표시한다.
+  document.querySelectorAll('nav a').forEach((a) => {
+    if (a.pathname === location.pathname) a.setAttribute('aria-current', 'page');
+  });
+
+  // 로그아웃(FR-002): 토큰과 대화 기록을 지우고 로그인으로 보낸다. 토큰은 서버에서 무효화하지 않는다(만료 1시간).
+  const logout = document.getElementById('logout');
+  logout.hidden = !localStorage.getItem('accessToken');
+  logout.addEventListener('click', () => {
+    localStorage.removeItem('accessToken');
+    sessionStorage.removeItem('chat');
+    location.href = '/login';
+  });
+})();
+</script>

@@ -1,8 +1,14 @@
 <%@ page contentType="text/html;charset=UTF-8" %>
 <!DOCTYPE html>
 <html lang="ko">
-<head><meta charset="UTF-8"><title>회원가입</title></head>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>회원가입</title>
+<link rel="stylesheet" href="/css/smart.css">
+</head>
 <body>
+<main>
 <h1>회원가입</h1>
 <form id="signup-form">
   <input name="loginId" placeholder="아이디" required>
@@ -12,6 +18,7 @@
 </form>
 <p id="msg"></p>
 <a href="/login">로그인</a>
+</main>
 <script>
 document.getElementById('signup-form').addEventListener('submit', async (e) => {
   e.preventDefault();

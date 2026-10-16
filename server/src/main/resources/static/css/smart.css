@@ -1,0 +1,305 @@
+/*
+ * 현대닷컴(hyundai.com/kr/ko/e) 톤의 공통 스타일.
+ * 색·크기는 그 페이지 CSS에서 많이 쓰인 값만 뽑았다: 네이비 #002c5f, 웜그레이 #f6f3f2,
+ * 각진 모서리, 좁은 자간(-0.4px), 옅은 그림자. 폰트(Hyundai Sans)·로고·이미지는 상표라 쓰지 않는다.
+ * 요소에 직접 스타일을 줘서 JSP는 이 파일만 연결하면 된다.
+ */
+:root {
+  --navy: #002c5f;
+  --teal: #007fa8;
+  --bg: #f6f3f2;
+  --line: #e4dcd3;
+  --muted: #666;
+  --disabled: #cecdca;
+  --shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: #000;
+  font: 400 16px/1.5 "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  letter-spacing: -0.4px;
+}
+
+main {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 16px 48px;
+}
+
+h1 {
+  margin: 32px 0 24px;
+  color: var(--navy);
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+h2 {
+  margin: 40px 0 12px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+a {
+  color: var(--teal);
+}
+
+p {
+  color: var(--muted);
+}
+
+/* 상단 메뉴: 본문 칸(main)과 왼쪽 끝을 맞춘다 */
+header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  height: 56px;
+  padding: 0 max(16px, calc((100% - 720px) / 2 + 16px));
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+
+nav {
+  display: flex;
+  gap: 24px;
+}
+
+nav a {
+  border-bottom: 2px solid transparent;
+  color: var(--navy);
+  font-weight: 500;
+  line-height: 53px;
+  text-decoration: none;
+}
+
+nav a[aria-current] {
+  border-bottom-color: var(--navy);
+  font-weight: 700;
+}
+
+/* 입력·버튼: 높이 48px 각진 사각형 */
+form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+input {
+  flex: 1 1 160px;
+  min-width: 0;
+  height: 48px;
+  padding: 0 16px;
+  border: 1px solid #ccc;
+  border-radius: 0;
+  background: #fff;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+input:focus {
+  outline: 0;
+  border-color: var(--navy);
+}
+
+button {
+  height: 48px;
+  padding: 0 24px;
+  border: 1px solid var(--navy);
+  border-radius: 0;
+  background: var(--navy);
+  color: #fff;
+  font: inherit;
+  font-weight: 500;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  border-color: var(--disabled);
+  background: var(--disabled);
+  cursor: default;
+}
+
+/* 표: 위쪽 네이비 선, 행 사이는 옅은 베이지 선 */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+th,
+td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+  text-align: left;
+}
+
+th {
+  border-top: 2px solid var(--navy);
+  color: var(--muted);
+  font-weight: 500;
+}
+
+td input {
+  width: 112px;
+  height: 36px;
+}
+
+td button {
+  height: 36px;
+  padding: 0 12px;
+  background: #fff;
+  color: var(--navy);
+}
+
+td input + button {
+  margin-left: 4px;
+}
+
+/* 채팅: 화면 높이를 꽉 채우고 대화 영역만 스크롤한다. 내 말풍선은 오른쪽 네이비, AI는 왼쪽 흰색 */
+body.chat {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+}
+
+body.chat main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+  padding-bottom: 16px;
+}
+
+body.chat h1 {
+  margin: 16px 0;
+  font-size: 20px;
+}
+
+#log {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 8px 0;
+  overflow-y: auto;
+}
+
+#chat-form {
+  flex-wrap: nowrap;
+  margin: 0;
+}
+
+#msg {
+  min-height: 24px;
+  margin: 4px 0;
+}
+
+.msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 85%;
+}
+
+.msg-me {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.msg-ai {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.who {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bubble {
+  padding: 12px 16px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.msg-me .bubble {
+  border-radius: 4px 4px 0 4px;
+  background: var(--navy);
+  color: #fff;
+}
+
+.msg-ai .bubble {
+  border: 1px solid var(--line);
+  border-radius: 4px 4px 4px 0;
+  background: #fff;
+}
+
+/* 송금 확인 카드·재무 표는 AI 말풍선 아래에 붙는다 */
+.transfer-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(360px, 100%);
+  padding: 16px;
+  border: 1px solid var(--line);
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.transfer-card input {
+  flex: none;
+}
+
+.transfer-card p {
+  margin: 0;
+  color: #000;
+}
+
+.transfer-card p.card-result {
+  color: var(--navy);
+  font-weight: 500;
+}
+
+.transfer-card .card-result:empty {
+  display: none;
+}
+
+.fin-note {
+  margin: 0;
+  font-size: 12px;
+}
+
+.chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+#new-chat {
+  height: 36px;
+  padding: 0 16px;
+  background: #fff;
+  color: var(--navy);
+}
+
+/* 로그아웃은 메뉴 줄 오른쪽 끝 */
+header button {
+  height: 36px;
+  margin-left: auto;
+  padding: 0 16px;
+  background: #fff;
+  color: var(--navy);
+}
