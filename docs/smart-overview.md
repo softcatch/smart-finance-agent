@@ -370,6 +370,17 @@ postgres_exporter (커넥션·락 대기) ────────────�
 cAdvisor (컨테이너 CPU·메모리) ───────────────────────┘
 ```
 
+- **구현**(NFR-036): 위 그림 그대로다. Prometheus·Grafana·postgres-exporter·cAdvisor는 `loadtest/compose.yaml`에서 앱 제한(코어 2개) 밖의 코어 6~9에서 돈다. `loadtest/run.sh`가 함께 띄우고 k6 결과를 `experimental-prometheus-rw`로 같은 Prometheus에 밀어 넣는다(끄려면 `MONITOR=0`). k6 지연은 p95 게이지가 아니라 native 히스토그램으로 보낸다 — p95 게이지는 라벨별로 따로 계산돼 합칠 수 없고, 히스토그램이어야 이름별 전체 요청의 p95를 구한다(k6 요약의 p95와 같은 실행에서 일반 API 89.5ms vs 92ms, 재무 채팅 5.50초 vs 5.61초로 맞았다). Grafana는 `http://localhost:3000`(로그인 없음, 로컬 전용 포트)이고, 환경을 띄우면 대시보드 "부하 테스트"(패널 16개)가 provisioning으로 홈 화면에 올라온다. 위에서부터 k6 → Spring → FastAPI → PostgreSQL → 컨테이너이고 시간축이 모두 같다.
+  - Spring: `micrometer-registry-prometheus` 의존성 하나만 앱에 들어간다. 지표는 측정 환경에서만 `loadtest` 프로파일(`application-loadtest.properties`)로 연다 — `/actuator/prometheus`, 요청 지연 히스토그램, Tomcat 스레드 지표. 기본 설정에서는 열리지 않는다(테스트가 확인한다).
+  - FastAPI: `/metrics`(내부망 전용). async라서 동기 스레드풀이 가득 차도 읽힌다. `http_request_seconds`(경로·상태별 지연), `http_requests_in_flight`(처리 중, 스레드를 기다리는 요청 포함), `threadpool_borrowed`·`threadpool_limit`(동기 엔드포인트 스레드풀), `chat_node_seconds`(노드별), `llm_call_seconds`(ok·error), `embedding_call_seconds`, `openai_errors_total`(종류별), `guard_decisions_total`(채팅·상세, 코드별).
+  - PostgreSQL: postgres-exporter의 커넥션(상태별)과 락, 그리고 추가 질의로 락 대기 수(`pg_lock_waiting_waiting`).
+  - 컨테이너: cAdvisor. Docker Desktop(containerd 스토리지)에서는 cAdvisor가 컨테이너 이름을 읽지 못해(`failed to identify the read-write layer ID`) 서비스마다 `cgroup_parent: /lt-<서비스>`를 주고 그 이름으로 CPU·메모리를 본다.
+- **병목이 화면에서 보이는지**(2026-10-16, `run.sh` 93 TPS 2분, 앱 2 vCPU·2GiB, 가짜 LLM): 부하 테스트 첫 결과의 병목이 대시보드에 그대로 나왔다. 요청 실패율 22.7%, 채팅 성공은 재무 84/1,123·송금 40/661·사업의 내용 17/70, 일반 API p95 99ms로 첫 결과와 같다.
+  - FastAPI: 처리 중 요청이 최대 389개인데 스레드풀은 40/40에 붙어 있다 — 약 350개가 스레드를 기다린다.
+  - Spring: Tomcat 일하는 스레드 최대 157/200, Hikari 사용 중 최대 1/10, PostgreSQL 락 대기 0. DB와 커넥션 풀은 병목이 아니다.
+  - CPU(코어 수, 앱 한도 2): Spring 최대 1.21, FastAPI 0.20, PostgreSQL 0.19. 노드별 p95는 사업의 내용 약 9초, 의도 추출 약 4.8초다.
+- **모니터링 오버헤드**(30 TPS, 90초 유지, 켬·끔 각 1회): 처리량은 같고(요청 2,734 vs 2,749) 일반 API p95는 171ms vs 161ms(+6%), 평균 CPU는 Spring 56% vs 47%(코어 +0.09개), FastAPI 11% vs 10%, PostgreSQL 7% vs 7%였다. 한 번씩 잰 값이라 잡음 안이다.
+
 ### E2E 테스트(JSP 화면)
 
 - **도구**: Playwright for Java. 서버(Java/Gradle)·AI(Python) 둘뿐인 프로젝트에

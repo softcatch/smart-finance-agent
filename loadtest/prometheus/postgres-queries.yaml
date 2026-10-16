@@ -1,0 +1,7 @@
+# postgres-exporter 추가 질의(NFR-036의 "락 대기"). 기본 지표(pg_locks_count)는 기다리는 락과 잡은 락을 나누지 않는다.
+pg_lock_waiting:
+  query: "SELECT count(*) AS waiting FROM pg_locks WHERE NOT granted"
+  metrics:
+    - waiting:
+        usage: "GAUGE"
+        description: "락을 얻으려고 기다리는 요청 수"

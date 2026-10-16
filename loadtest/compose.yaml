@@ -3,24 +3,30 @@
 # 앱(Spring·FastAPI·PostgreSQL)은 같은 코어 2개를 나눠 쓰고(cpuset, t3.small의 2 vCPU처럼 서로 경쟁),
 # 메모리는 합쳐서 2GiB(1g + 512m + 512m)다. 가짜 LLM은 제한 밖의 다른 코어에 둔다. k6는 호스트에서 돈다.
 # 개발 환경과 섞이지 않게 프로젝트 이름(smart-loadtest)과 이미지 이름을 따로 쓴다(볼륨도 프로젝트별이다).
+# cgroup_parent(/lt-서비스명): Docker Desktop(containerd 스토리지)에서는 cAdvisor가 컨테이너 이름을 못 읽는다.
+# 서비스별 cgroup을 따로 만들어 그 이름으로 CPU·메모리를 본다.
 services:
   db:
+    cgroup_parent: /lt-db # cAdvisor가 이 이름으로 서비스별 CPU·메모리를 합쳐 준다
     cpuset: "0,1"
     mem_limit: 512m
     ports: !reset []
 
   server:
+    cgroup_parent: /lt-server # cAdvisor가 이 이름으로 서비스별 CPU·메모리를 합쳐 준다
     image: smart-loadtest-server
     cpuset: "0,1"
     mem_limit: 1g
     environment:
       JAVA_TOOL_OPTIONS: -Xmx512m # 메모리 2GiB 호스트의 JVM 기본 힙(1/4)과 같다
+      SPRING_PROFILES_ACTIVE: loadtest # /actuator/prometheus를 연다(application-loadtest.properties)
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health >/dev/null"]
       interval: 5s
       retries: 40
 
   ai:
+    cgroup_parent: /lt-ai # cAdvisor가 이 이름으로 서비스별 CPU·메모리를 합쳐 준다
     image: smart-loadtest-ai
     cpuset: "0,1"
     mem_limit: 512m
@@ -33,6 +39,7 @@ services:
 
   # 가짜 LLM(NFR-029). 앱 이미지에 없는 ai/loadtest를 마운트해서 쓴다.
   fake-llm:
+    cgroup_parent: /lt-fake-llm # cAdvisor가 이 이름으로 서비스별 CPU·메모리를 합쳐 준다
     build: ./ai
     image: smart-loadtest-ai
     cpuset: "2-5"
@@ -64,3 +71,60 @@ services:
     depends_on:
       server:
         condition: service_healthy
+
+  # --- 모니터링(NFR-036): 앱 제한(코어 0,1)과 가짜 LLM(코어 2~5) 밖의 코어 6~9에서 돈다. 로컬 전용 포트다.
+  prometheus:
+    cgroup_parent: /lt-prometheus # cAdvisor가 이 이름으로 서비스별 CPU·메모리를 합쳐 준다
+    image: prom/prometheus:v3.5.0
+    cpuset: "6-9"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-remote-write-receiver # k6가 결과를 밀어 넣는다
+      - --enable-feature=native-histograms # k6 지연을 히스토그램으로 받아 이름별 p95를 정확히 합산한다
+      - --storage.tsdb.retention.time=2d
+    volumes:
+      - ./loadtest/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+
+  grafana:
+    cgroup_parent: /lt-grafana # cAdvisor가 이 이름으로 서비스별 CPU·메모리를 합쳐 준다
+    image: grafana/grafana:12.1.0
+    cpuset: "6-9"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true" # 측정용 로컬 환경이라 로그인 없이 연다
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/loadtest.json
+    volumes:
+      - ./loadtest/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./loadtest/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+
+  postgres-exporter:
+    cgroup_parent: /lt-postgres-exporter # cAdvisor가 이 이름으로 서비스별 CPU·메모리를 합쳐 준다
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    cpuset: "6-9"
+    environment:
+      DATA_SOURCE_NAME: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
+      PG_EXPORTER_EXTEND_QUERY_PATH: /queries.yaml # 락 대기 수(추가 질의, 이 옵션은 deprecated지만 아직 동작한다)
+    volumes:
+      - ./loadtest/prometheus/postgres-queries.yaml:/queries.yaml:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  cadvisor:
+    cgroup_parent: /lt-cadvisor # cAdvisor가 이 이름으로 서비스별 CPU·메모리를 합쳐 준다
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    cpuset: "6-9"
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro # 컨테이너 이름을 읽는다
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    devices:
+      - /dev/kmsg
