@@ -24,3 +24,6 @@ venv/
 
 # OS
 .DS_Store
+
+# 부하 테스트 결과(loadtest/run.sh가 만든다)
+loadtest/results/
