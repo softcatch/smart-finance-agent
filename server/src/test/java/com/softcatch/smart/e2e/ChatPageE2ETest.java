@@ -34,6 +34,7 @@ class ChatPageE2ETest extends E2ETestBase {
 
     assertThat(page.locator(".msg-me .bubble")).hasText("안녕");
     assertThat(page.locator(".msg-ai .bubble")).hasText("안녕하세요"); // 가짜 FastAPI의 기본 답변
+    assertThat(page.locator(".detail-link")).hasCount(0); // detailId가 없는 답변에는 링크가 없다
   }
 
   @Test
@@ -189,6 +190,34 @@ class ChatPageE2ETest extends E2ETestBase {
   }
 
   @Test
+  void 재무_비교_답변의_상세_보기_링크로_상세_화면이_열린다() {
+    signIn(signupAndLogin("링크유저"));
+    String detailId = stubAiWithDetail();
+    page.navigate(url("/chat"));
+    page.fill("input[name=message]", "삼성전자 실적 알려줘");
+    page.click("#chat-form button");
+
+    page.click(".detail-link");
+
+    page.waitForURL("**/chat/details/" + detailId);
+    assertThat(page.locator("#report")).hasText("보고서입니다"); // 가짜 FastAPI의 기본 보고서
+  }
+
+  @Test
+  void 상세_보기_링크는_메뉴를_다녀와도_남는다() {
+    signIn(signupAndLogin("링크유지유저"));
+    String detailId = stubAiWithDetail();
+    page.navigate(url("/chat"));
+    page.fill("input[name=message]", "삼성전자 실적 알려줘");
+    page.click("#chat-form button");
+    assertThat(page.locator(".detail-link")).hasAttribute("href", "/chat/details/" + detailId);
+
+    openMenuAndBack("/accounts");
+
+    assertThat(page.locator(".detail-link")).hasAttribute("href", "/chat/details/" + detailId);
+  }
+
+  @Test
   void 토큰이_없으면_로그인_페이지로_이동한다() {
     page.navigate(url("/chat"));
 
@@ -285,6 +314,19 @@ class ChatPageE2ETest extends E2ETestBase {
     page.waitForURL("**" + otherPath);
     page.click("nav a[href='/chat']");
     page.waitForURL("**/chat");
+  }
+
+  // 가짜 FastAPI가 재무 비교 표와 상세 보기 ID를 돌려주게 하고, 그 ID를 돌려준다.
+  // Spring이 이 답변을 받아 ID의 주인을 기록하므로 상세 화면이 실제로 열린다.
+  private String stubAiWithDetail() {
+    String detailId = "dt_e2e" + System.nanoTime();
+    FAKE_AI.responseBody =
+        "{\"success\":true,\"data\":{\"reply\":\"삼성전자 재무 비교입니다.\",\"guard\":\"PASS\","
+            + "\"table\":{\"columns\":[\"항목\",\"삼성전자\"],\"rows\":[[\"매출액\",\"791,405억원 (+10.0%)\"]],"
+            + "\"note\":\"2026년 1분기 · 연결 기준\"},\"detailId\":\""
+            + detailId
+            + "\"},\"error\":null}";
+    return detailId;
   }
 
   // 가짜 FastAPI가 확인 카드를 돌려주게 한다. 카드의 요청ID는 Spring이 실제로 발급한 값이다.

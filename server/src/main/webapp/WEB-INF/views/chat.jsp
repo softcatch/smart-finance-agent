@@ -28,7 +28,7 @@ const log = document.getElementById('log');
 const msg = document.getElementById('msg');
 
 // 대화는 이 탭의 sessionStorage에 둔다 — 메뉴를 다녀와도 같은 대화를 잇고, 탭을 닫거나 로그아웃하면 사라진다.
-// items: [{ who, text, card?, table?, result?, done? }] — result·done은 확인 카드의 결과 표시다.
+// items: [{ who, text, card?, table?, detailId?, result?, done? }] — result·done은 확인 카드의 결과 표시다.
 let state = JSON.parse(sessionStorage.getItem('chat')) || { threadId: null, items: [] };
 
 function save() {
@@ -51,7 +51,7 @@ async function call(path, body) {
   return res.json();
 }
 
-// 말풍선 한 줄. 내 메시지(me)는 오른쪽, AI(ai)는 왼쪽에 붙는다(CSS). 확인 카드·표는 AI 말풍선 아래에 붙는다.
+// 말풍선 한 줄. 내 메시지(me)는 오른쪽, AI(ai)는 왼쪽에 붙는다(CSS). 확인 카드·표·상세 보기 링크는 AI 말풍선 아래에 붙는다.
 function render(item) {
   const row = document.createElement('div');
   row.className = 'msg msg-' + item.who;
@@ -67,6 +67,7 @@ function render(item) {
   row.appendChild(bubble);
   if (item.card) addCard(row, item);
   if (item.table) addTable(row, item.table);
+  if (item.detailId) addDetailLink(row, item.detailId);
   log.appendChild(row);
   log.scrollTop = log.scrollHeight;
 }
@@ -159,6 +160,15 @@ function addTable(row, t) {
   }
 }
 
+// 상세 보기(FR-016): 같은 탭에서 연다. 대화는 sessionStorage에 있어 돌아오면 이어진다.
+function addDetailLink(row, detailId) {
+  const link = document.createElement('a');
+  link.className = 'detail-link';
+  link.href = '/chat/details/' + encodeURIComponent(detailId);
+  link.textContent = '상세 보기';
+  row.appendChild(link);
+}
+
 // 저장된 대화가 있으면 그 threadId를 잇고, 없으면 새 대화를 만든다(FR-013). 전송은 이 약속이 끝난 뒤에 한다.
 // 응답은 요청을 보낸 그 대화에만 적는다 — 먼저 보낸 요청이 늦게 끝나도 [새 대화]의 threadId를 덮어쓰지 않는다.
 function newThread() {
@@ -195,7 +205,10 @@ document.getElementById('chat-form').addEventListener('submit', async (e) => {
     const body = await call('/api/v1/chat/threads/' + threadId + '/messages', { message: text });
     if (state !== chat) return; // 답을 기다리는 사이 [새 대화]를 눌렀다 — 새 대화에 섞지 않는다
     if (body.success) {
-      push({ who: 'ai', text: body.data.reply, card: body.data.transferCard, table: body.data.table });
+      push({
+        who: 'ai', text: body.data.reply, card: body.data.transferCard,
+        table: body.data.table, detailId: body.data.detailId
+      });
     } else {
       msg.textContent = body.error.message;
     }
