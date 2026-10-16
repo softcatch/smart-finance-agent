@@ -50,9 +50,12 @@ class DetailPageE2ETest extends E2ETestBase {
 
     page.navigate(url("/chat/details/" + detailId));
 
-    // smart.css가 적용돼야 본문 칸(main)의 최대 너비가 걸린다
+    // smart.css가 적용돼야 본문 칸(main)의 최대 너비가 걸리고, 보고서는 줄바꿈을 유지한다
     assertEquals(
         "720px", page.evaluate("getComputedStyle(document.querySelector('main')).maxWidth"));
+    assertEquals(
+        "pre-wrap",
+        page.evaluate("getComputedStyle(document.querySelector('#report')).whiteSpace"));
   }
 
   @Test

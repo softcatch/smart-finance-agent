@@ -12,7 +12,7 @@
 <main>
 <h1>상세 보기</h1>
 <p id="msg">보고서를 만드는 중입니다. 잠시만 기다려 주세요.</p>
-<div id="report" style="white-space: pre-wrap; margin-bottom: 24px"></div>
+<div id="report" class="report"></div>
 <div id="detail-table"></div>
 </main>
 <script>
