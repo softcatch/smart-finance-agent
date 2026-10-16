@@ -1,6 +1,6 @@
 // 전체 시나리오 부하 테스트(NFR-031): 행동 유형 4개를 DART 50·송금 30·내역 15·가입 5% 비율로 건다.
 // loadtest/run.sh가 실행한다. 환경변수: BASE_URL, TARGET_TPS(요청/초, 기본 93), DURATION(유지 시간, 기본 3m),
-// WARMUP(올리는 시간, 기본 30s), USERS(시드 회원 수), RUN_ID(가입 아이디가 겹치지 않게).
+// WARMUP(올리는 시간, 30s처럼 초 단위, 기본 30s), USERS(시드 회원 수), RUN_ID(가입 아이디가 겹치지 않게).
 // 세션은 열린 모델(constant 도착률)로 도착한다 — 서버가 느려져도 도착률이 줄지 않는다. 생각하는 시간은
 // 압축해서(0.3초) 세션이 오래 머물지 않게 한다. 요청 수는 개요 6절의 행동 유형 표와 같다.
 import http from 'k6/http';
@@ -15,7 +15,8 @@ const USERS = Number(__ENV.USERS || 10000);
 const RUN_ID = __ENV.RUN_ID || String(Date.now());
 const PASSWORD = 'pw12345!'; // 시드 회원 공통
 const ACCOUNT_PASSWORD = '1234';
-const WARMUP_MS = Number(WARMUP.replace('s', '')) * 1000;
+if (!/^\d+s$/.test(WARMUP)) throw new Error(`WARMUP은 30s처럼 초 단위로 적는다: ${WARMUP}`);
+const WARMUP_MS = Number(WARMUP.slice(0, -1)) * 1000;
 
 // 유형별 비율과 세션당 요청 수(개요 6절): 가중평균 5.65개
 const MIX = { dart: 0.5, transfer: 0.3, history: 0.15, signup: 0.05 };
@@ -79,7 +80,7 @@ export const options = {
     'http_req_duration{name:chat_transfer,phase:hold}': [`p(95)<${LIMIT.chat_transfer}`],
     'http_req_duration{name:detail,phase:hold}': [`p(95)<${LIMIT.detail}`],
     'http_req_failed{phase:hold}': ['rate<0.01'],
-    checks: ['rate>0.99'],
+    'checks{phase:hold}': ['rate>0.99'],
     dropped_iterations: ['count==0'], // 목표 도착률을 못 채우면(VU 한도) 한계에 걸린 것이다
   },
   summaryTrendStats: ['avg', 'med', 'p(90)', 'p(95)', 'max'],
@@ -95,12 +96,16 @@ const pick = (list) => list[Math.floor(Math.random() * list.length)];
 const accountNumber = (userNo) => String(100000000000 + userNo);
 const randomUser = () => 1 + Math.floor(Math.random() * USERS);
 
+// 올리는 구간(warmup)과 유지 구간(hold). 요청과 검사에 태그로 붙여 합격 판정에서 올리는 구간을 뺀다.
+function phase() {
+  return exec.instance.currentTestRunDuration < WARMUP_MS ? 'warmup' : 'hold';
+}
+
 // 요청 하나. name은 경로 대신 쓰는 라벨(경로에 ID가 들어가 태그가 늘어나지 않게), kind는 합격 기준 묶음이다.
 function call(method, path, body, ctx, name, kind, headers = {}) {
-  const phase = exec.instance.currentTestRunDuration < WARMUP_MS ? 'warmup' : 'hold';
   const params = {
     headers: { 'Content-Type': 'application/json', ...headers },
-    tags: { name, kind, phase },
+    tags: { name, kind, phase: phase() },
   };
   if (ctx.token) params.headers.Authorization = `Bearer ${ctx.token}`;
   return http.request(method, BASE + path, body === null ? null : JSON.stringify(body), params);
@@ -115,7 +120,7 @@ function ok(res, label, status = 200) {
       return false; // JSON이 아닌 응답(게이트웨이 오류 등)
     }
   };
-  return check(res, { [label]: isOk }) ? res : null;
+  return check(res, { [label]: isOk }, { phase: phase() }) ? res : null;
 }
 
 function login(ctx, loginId) {
@@ -155,7 +160,7 @@ export function dart() {
   think();
   const last = chat(ctx, threadId, `${b} 경쟁사 비교해줘`, 'chat_financial');
   const detailId = last && last.json('data.detailId');
-  check(last, { 'detailId 발급': () => !!detailId });
+  check(last, { 'detailId 발급': () => !!detailId }, { phase: phase() });
   if (!detailId) return;
   think();
   ok(call('GET', `/api/v1/chat/details/${detailId}`, null, ctx, 'detail', 'detail'), 'detail');
@@ -177,7 +182,7 @@ export function transfer() {
   const amount = 1000 * (1 + Math.floor(Math.random() * 9));
   const card = chat(ctx, threadId, `${accountNumber(other)}로 ${amount}원 보내줘`, 'chat_transfer');
   const requestId = card && card.json('data.transferCard.requestId');
-  check(card, { '확인 카드': () => !!requestId });
+  check(card, { '확인 카드': () => !!requestId }, { phase: phase() });
   if (!requestId) return;
   think();
   const confirm = call('POST', `/api/v1/transfer-requests/${requestId}/confirm`, { password: ACCOUNT_PASSWORD }, ctx, 'confirm', 'api');
