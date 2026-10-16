@@ -15,6 +15,7 @@ services:
     mem_limit: 1g
     environment:
       JAVA_TOOL_OPTIONS: -Xmx512m # 메모리 2GiB 호스트의 JVM 기본 힙(1/4)과 같다
+      SPRING_PROFILES_ACTIVE: loadtest # /actuator/prometheus를 연다(application-loadtest.properties)
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8080/actuator/health >/dev/null"]
       interval: 5s
