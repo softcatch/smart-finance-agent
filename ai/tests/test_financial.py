@@ -1,4 +1,12 @@
-from app.financial import build_detail_table, build_table, period_label
+from app.collect import load_companies
+from app.financial import (
+    COMPETITOR_GROUPS,
+    MAX_COMPANIES,
+    build_detail_table,
+    build_table,
+    find_competitors,
+    period_label,
+)
 
 SEC = ("005930", "삼성전자")
 HYNIX = ("000660", "SK하이닉스")
@@ -232,3 +240,20 @@ def test_상세_표에서_데이터가_없는_기업은_note에_미공시로_적
 
 def test_상세_표에서_데이터가_하나도_없으면_None():
     assert build_detail_table([SEC, HYNIX], {"005930": [], "000660": []}) is None
+
+
+def test_경쟁사는_같은_업종에서_자기를_뺀_목록이다():
+    assert find_competitors("005930") == ("반도체", ["000660"])
+    assert find_competitors("005380") == ("자동차", ["000270", "012330"])
+
+
+def test_경쟁사_목록에_없는_기업은_None():
+    assert find_competitors("015760") is None  # 한국전력
+
+
+def test_경쟁사_목록은_수집_대상이고_업종은_2에서_최대_개수이며_기업은_한_업종에만_있다():
+    collected = {stock for stock, _ in load_companies()}
+    members = [stock for group in COMPETITOR_GROUPS.values() for stock in group]
+    assert set(members) <= collected
+    assert all(2 <= len(group) <= MAX_COMPANIES for group in COMPETITOR_GROUPS.values())
+    assert len(members) == len(set(members))

@@ -8,7 +8,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from app.business import ASK_BUSINESS_COMPANY, answer_business, source_lines
-from app.financial import ASK_COMPANY, build_table
+from app.financial import ASK_COMPANY, MAX_COMPANIES, build_table, find_competitors
 from app.guard import (
     CANARY,
     INJECTION_REPLY,
@@ -30,8 +30,13 @@ EXTRACT_PROMPT = (
     "사용자 메시지에서 의도와 값을 뽑는다. 송금을 요청하거나 아래 진행 중인 송금 정보를 이어서 "
     "말하면 is_transfer=true. 송금 내역이나 보낸·받은 금액을 묻는 질문이면 is_history=true이고, "
     "기간이 오늘·이번 달·지난달·최근 7일 중 하나면 period에 넣는다. 기업의 매출액·영업이익·순이익 "
-    "같은 재무 실적을 묻거나 기업끼리 비교하면 is_financial=true이고 말한 기업 이름을 companies에 "
-    "말한 그대로 넣는다(회사 소개·사업 내용 질문이나 수주잔고·투자금·시장점유율 같은 다른 "
+    "같은 재무 실적을 묻거나 기업끼리·경쟁사와 비교하면 is_financial=true이다. 사용자가 말한 기업 "
+    "이름은 경쟁사와 비교해 달라는 문장이어도 반드시 companies에 말한 그대로 넣는다. 번역하거나 "
+    "영문 표기로 바꾸지 않고, '경쟁사' 같은 일반 명사나 말하지 않은 기업은 넣지 않는다. 경쟁사와 "
+    "비교해 달라는 요청은 재무 비교다(예: '삼성전자 경쟁사랑 비교해줘'는 is_financial=true, "
+    "companies=['삼성전자'], '삼성전자와 현대자동차 경쟁사 비교해줘'는 is_financial=true, "
+    "companies=['삼성전자', '현대자동차']). "
+    "(회사 소개·사업 내용 질문이나 수주잔고·투자금·시장점유율 같은 다른 "
     "숫자는 해당하지 않는다). 기업의 회사 소개·주요 제품·사업 구조나 수주잔고·투자금·시장점유율 "
     "같은 사업 내용을 물으면 is_business=true이고 기업 이름을 companies에 말한 그대로 넣는다. "
     "말하지 않은 값은 null로 둔다. "
@@ -163,21 +168,44 @@ def build_graph(llm: BaseChatModel, extractor=None):
         return {"messages": [AIMessage(reply)], "reply": reply}
 
     # 재무 비교: 기업을 찾고(조회 함수) 표는 코드가 만든다. 숫자는 LLM이 만들지 않는다(NFR-002).
+    # 질문에 "경쟁"이 있고 기업을 하나만 말했으면 그 업종의 경쟁사를 더한다(FR-019).
+    # 둘 이상 말했으면 말한 그대로 비교한다(사용자 지정 우선). 한 번에 최대 3곳까지 비교한다.
     def financial(state: ChatState, config: RunnableConfig) -> ChatState:
         names = state.get("companies") or []
         if not names:
             return {"messages": [AIMessage(ASK_COMPANY)], "reply": ASK_COMPANY}
+        compare = config["configurable"]["compare_financials"]
+        wants_peers = len(names) == 1 and "경쟁" in state["messages"][-1].content
+        sector, off_list = None, False
         try:
-            companies, missing, rows = config["configurable"]["compare_financials"](names)
+            companies, missing, rows = compare(names)
+            if wants_peers and len(companies) == 1:
+                if found := find_competitors(companies[0][0]):
+                    sector, peers = found
+                    stocks = [companies[0][0], *peers[: MAX_COMPANIES - 1]]
+                    companies, missing, rows = compare(stocks)  # 종목코드도 이름처럼 찾는다
+                else:
+                    off_list = True
         except psycopg.errors.UndefinedTable:  # 수집 전(DART 키가 없으면 테이블도 아직 없다)
             reply = "재무 데이터가 아직 수집되지 않았습니다. 수집이 끝난 뒤 다시 물어봐 주세요."
             return {"messages": [AIMessage(reply)], "reply": reply}
         except psycopg.OperationalError:  # DB를 못 읽어도 채팅은 이어진다
             reply = "재무 데이터를 지금 읽을 수 없습니다. 잠시 후 다시 시도해 주세요."
             return {"messages": [AIMessage(reply)], "reply": reply}
+        excluded = [name for _, name in companies[MAX_COMPANIES:]]
+        companies = companies[:MAX_COMPANIES]
         table = build_table(companies, rows) if companies else None
         if table:
             reply = f"{', '.join(name for _, name in companies)}의 재무를 비교했습니다."
+            if sector:
+                reply += f" 경쟁사는 {sector} 목록에서 골랐습니다."
+            if off_list:
+                reply += " 경쟁사 목록에 없는 기업이라 비교할 기업을 직접 말씀해 주세요."
+            if excluded:
+                reply += (
+                    f" 한 번에 최대 {MAX_COMPANIES}곳까지 비교합니다. "
+                    f"제외한 기업: {', '.join(excluded)}"
+                )
             if missing:
                 reply += f" 찾지 못한 기업: {', '.join(missing)}"
         elif companies:

@@ -10,9 +10,28 @@ BASIS = {"CFS": "연결", "OFS": "별도"}
 ACCOUNTS = ("매출액", "영업이익", "당기순이익")
 ASK_COMPANY = "어느 기업을 볼까요? 기업 이름을 알려 주세요. 예: 삼성전자와 SK하이닉스 비교해 줘"
 
+# 경쟁사 목록(FR-019): 직접 만든 업종별 묶음(종목코드). 목록에 없는 기업은 사용자 지정으로만 비교한다.
+# 수집 대상 안에서 지표 4개가 모두 나오는 업종만 넣었다(금융지주는 매출액이 없어 뺐다).
+# ponytail: 고정 목록 — 업종을 늘릴 때 한 줄 더한다.
+COMPETITOR_GROUPS = {
+    "반도체": ("005930", "000660"),  # 삼성전자, SK하이닉스
+    "자동차": ("005380", "000270", "012330"),  # 현대차, 기아, 현대모비스
+    "2차전지": ("373220", "006400"),  # LG에너지솔루션, 삼성SDI
+    "인터넷": ("035420", "035720"),  # NAVER, 카카오
+}
+MAX_COMPANIES = 3  # 한 번에 비교하는 기업 수. 질문한 기업을 포함한다(명세)
+
 
 def period_label(year: int, reprt_code: str) -> str:
     return f"{year}년 {LABELS[reprt_code]}"
+
+
+# 기업이 속한 업종과 그 경쟁사 종목코드(자기 제외, 목록 순서). 목록에 없으면 None.
+def find_competitors(stock: str) -> tuple[str, list[str]] | None:
+    for sector, group in COMPETITOR_GROUPS.items():
+        if stock in group:
+            return sector, [s for s in group if s != stock]
+    return None
 
 
 def _key(period: tuple[int, str]) -> tuple[int, int]:
