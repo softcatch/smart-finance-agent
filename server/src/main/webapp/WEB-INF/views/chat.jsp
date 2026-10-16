@@ -160,12 +160,14 @@ function addTable(row, t) {
 }
 
 // 저장된 대화가 있으면 그 threadId를 잇고, 없으면 새 대화를 만든다(FR-013). 전송은 이 약속이 끝난 뒤에 한다.
+// 응답은 요청을 보낸 그 대화에만 적는다 — 먼저 보낸 요청이 늦게 끝나도 [새 대화]의 threadId를 덮어쓰지 않는다.
 function newThread() {
+  const chat = state;
   return call('/api/v1/chat/threads').then((body) => {
     if (!body.success) throw new Error(body.error.message);
-    state.threadId = body.data.threadId;
-    save();
-    return state.threadId;
+    chat.threadId = body.data.threadId;
+    if (state === chat) save();
+    return chat.threadId;
   });
 }
 let ready = state.threadId ? Promise.resolve(state.threadId) : newThread();

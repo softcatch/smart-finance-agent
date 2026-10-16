@@ -7,8 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.microsoft.playwright.Locator;
+import com.microsoft.playwright.Route;
 import com.microsoft.playwright.options.BoundingBox;
 import com.softcatch.smart.TestcontainersConfiguration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -82,6 +85,30 @@ class ChatPageE2ETest extends E2ETestBase {
 
     assertThat(page.locator(".msg-ai .bubble")).hasText("안녕하세요");
     assertNotEquals(firstThreadId, json.readTree(FAKE_AI.lastBody).get("threadId").asText());
+  }
+
+  @Test
+  void 먼저_보낸_대화_생성_응답이_늦게_와도_새_대화의_threadId를_덮어쓰지_않는다() {
+    signIn(signupAndLogin("연타유저"));
+    List<Route> held = new ArrayList<>();
+    page.route(
+        "**/api/v1/chat/threads",
+        route -> {
+          if (held.isEmpty()) {
+            held.add(route); // 화면을 열 때 나간 첫 요청은 잡아 둔다
+          } else {
+            route.resume(); // [새 대화]의 요청은 바로 보낸다
+          }
+        });
+    page.navigate(url("/chat"));
+    page.click("#new-chat");
+    page.waitForFunction("JSON.parse(sessionStorage.getItem('chat'))?.threadId");
+    Object latest = page.evaluate("JSON.parse(sessionStorage.getItem('chat')).threadId");
+
+    page.waitForResponse("**/api/v1/chat/threads", () -> held.get(0).resume()); // 첫 응답이 뒤늦게 온다
+    page.waitForTimeout(100); // 화면이 그 응답을 처리할 시간
+
+    assertEquals(latest, page.evaluate("JSON.parse(sessionStorage.getItem('chat')).threadId"));
   }
 
   @Test
