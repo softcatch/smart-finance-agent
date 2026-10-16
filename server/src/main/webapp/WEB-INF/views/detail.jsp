@@ -1,13 +1,20 @@
 <%@ page contentType="text/html;charset=UTF-8" isELIgnored="true" %>
 <!DOCTYPE html>
 <html lang="ko">
-<head><meta charset="UTF-8"><title>상세 보기</title></head>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>상세 보기</title>
+<link rel="stylesheet" href="/css/smart.css">
+</head>
 <body>
 <%@ include file="nav.jspf" %>
+<main>
 <h1>상세 보기</h1>
 <p id="msg">보고서를 만드는 중입니다. 잠시만 기다려 주세요.</p>
-<div id="report" style="white-space: pre-wrap"></div>
+<div id="report" style="white-space: pre-wrap; margin-bottom: 24px"></div>
 <div id="detail-table"></div>
+</main>
 <script>
 const token = localStorage.getItem('accessToken');
 // 주소(/chat/details/{detailId})의 마지막 조각이 상세 보기 ID다.
@@ -19,7 +26,6 @@ function renderTable(t) {
   const box = document.getElementById('detail-table');
   const table = document.createElement('table');
   table.className = 'fin-table';
-  table.border = '1';
   const head = document.createElement('thead');
   const headRow = document.createElement('tr');
   t.columns.forEach((text) => {
