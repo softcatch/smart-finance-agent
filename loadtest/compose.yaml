@@ -80,6 +80,7 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --web.enable-remote-write-receiver # k6가 결과를 밀어 넣는다
+      - --enable-feature=native-histograms # k6 지연을 히스토그램으로 받아 이름별 p95를 정확히 합산한다
       - --storage.tsdb.retention.time=2d
     volumes:
       - ./loadtest/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
