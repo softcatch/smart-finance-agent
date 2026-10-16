@@ -1,0 +1,19 @@
+# 측정 환경의 Prometheus 설정(NFR-036). k6는 긁지 않고 remote write로 밀어 넣는다(run.sh).
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: spring
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["server:8080"]
+  - job_name: fastapi
+    static_configs:
+      - targets: ["ai:8000"]
+  - job_name: postgres
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
