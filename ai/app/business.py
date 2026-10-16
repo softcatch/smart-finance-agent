@@ -3,8 +3,10 @@ from html.parser import HTMLParser
 
 from langchain_core.messages import SystemMessage
 from langchain_openai import OpenAIEmbeddings
+from openai import OpenAIError
 
 from app.guard import CANARY
+from app.metrics import EMBEDDING_SECONDS, OPENAI_ERRORS
 
 # 사업의 내용(FR-021): DART 원문에서 "II. 사업의 내용"만 뽑아 청크로 나누고 벡터로 만든다.
 EMBEDDING_MODEL = "text-embedding-3-small"  # 1536차원 — store의 vector(1536)과 함께 바꾼다
@@ -161,7 +163,12 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     embeddings = OpenAIEmbeddings(
         model=EMBEDDING_MODEL, chunk_size=100, check_embedding_ctx_length=False
     )
-    return embeddings.embed_documents(texts)
+    try:
+        with EMBEDDING_SECONDS.time():
+            return embeddings.embed_documents(texts)
+    except OpenAIError as err:
+        OPENAI_ERRORS.labels(type(err).__name__).inc()
+        raise
 
 
 # --- 채팅 답변(FR-017) ---
