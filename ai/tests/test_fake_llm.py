@@ -2,11 +2,8 @@ import base64
 import json
 import math
 import struct
-import threading
-import time
 
 import pytest
-import uvicorn
 from fastapi.testclient import TestClient
 
 from app.business import embed_texts
@@ -23,6 +20,7 @@ from loadtest.fake_llm import (
     create_app,
     embedding_vector,
     extract_slots,
+    serve,
 )
 
 ONE_MS = {kind: [1] for kind in KINDS}
@@ -153,21 +151,11 @@ def test_호출_종류마다_난수열이_따로라서_섞여_불려도_종류�
 @pytest.fixture
 def fake_llm_url(monkeypatch):
     """지연 1ms짜리 가짜 LLM을 실제 포트에 띄우고, 앱이 쓰는 환경변수를 거기로 돌린다."""
-    server = uvicorn.Server(
-        uvicorn.Config(create_app(ONE_MS), host="127.0.0.1", port=0, log_level="warning")
-    )
-    thread = threading.Thread(target=server.run, daemon=True)
-    thread.start()
-    deadline = time.monotonic() + 5
-    while not server.started:
-        assert time.monotonic() < deadline, "가짜 LLM 서버가 뜨지 않았다"
-        time.sleep(0.01)
-    port = server.servers[0].sockets[0].getsockname()[1]
-    monkeypatch.setenv("OPENAI_BASE_URL", f"http://127.0.0.1:{port}/v1")
+    url, stop = serve(create_app(ONE_MS))
+    monkeypatch.setenv("OPENAI_BASE_URL", url)
     monkeypatch.setenv("OPENAI_API_KEY", "fake")
     yield
-    server.should_exit = True
-    thread.join(timeout=5)
+    stop()
 
 
 def _chunk():

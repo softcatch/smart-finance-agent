@@ -18,9 +18,12 @@ import os
 import random
 import re
 import struct
+import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
+import uvicorn
 from fastapi import FastAPI, Request
 
 LATENCY = Path(__file__).with_name("latency.json")
@@ -211,3 +214,20 @@ app = create_app(
     json.loads(LATENCY.read_text(encoding="utf-8"))["samples_ms"],
     int(os.getenv("FAKE_LLM_SEED", "1")),
 )
+
+
+def serve(fake: FastAPI) -> tuple[str, Callable[[], None]]:
+    """가짜 서버를 스레드로 띄우고 (OPENAI_BASE_URL로 쓸 주소, 끄는 함수)를 돌려준다. 테스트·평가용."""
+    server = uvicorn.Server(uvicorn.Config(fake, host="127.0.0.1", port=0, log_level="warning"))
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 5
+    while not server.started:
+        assert time.monotonic() < deadline, "가짜 LLM 서버가 뜨지 않았다"
+        time.sleep(0.01)
+
+    def stop() -> None:
+        server.should_exit = True
+        thread.join(timeout=5)
+
+    return f"http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}/v1", stop
