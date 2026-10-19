@@ -25,7 +25,8 @@ const REQUESTS = { dart: 6, transfer: 6, history: 4, signup: 5 };
 const perSession = Object.keys(MIX).reduce((sum, type) => sum + MIX[type] * REQUESTS[type], 0);
 const sessionsPerSec = TARGET_TPS / perSession;
 
-// 세션이 머무는 시간(채팅은 LLM을 기다린다)의 대략값. VU를 미리 잡는 데만 쓴다. 도착률이 높아지면 VU도 같이 는다.
+// 세션이 머무는 시간(채팅은 LLM을 기다린다)의 대략값. VU를 미리 잡는 데만 쓴다. 서버가 막혀 세션이 길어지면 VU가 늘어나
+// 도착률을 지킨다(상한은 미리 잡은 수의 30배 — 상한에 닿으면 k6가 도착을 건너뛰고 dropped_iterations로 센다).
 const SESSION_SECONDS = { dart: 30, transfer: 15, history: 3, signup: 4 };
 
 function arrival(type) {
@@ -38,7 +39,7 @@ function arrival(type) {
     startRate: 0,
     timeUnit: '10s',
     preAllocatedVUs: vus,
-    maxVUs: vus * 4,
+    maxVUs: vus * 30,
     stages: [
       { target: rate, duration: WARMUP },
       { target: rate, duration: DURATION },
@@ -64,12 +65,16 @@ function sumP95(kinds) {
   sums.sort((a, b) => a - b);
   return sums[Math.ceil(0.95 * sums.length) - 1];
 }
-const LIMIT = {
-  chat_financial: sumP95(['extract']) + 1000, // 재무 비교·경쟁사 비교: 의도 추출만 LLM
-  chat_business: sumP95(['extract', 'embedding', 'business']) + 1000, // 사업의 내용: 추출 + 임베딩 + 답변
-  chat_transfer: sumP95(['extract']) + 1000, // 송금 요청: 의도 추출만 LLM
-  detail: sumP95(['report']) + 1000, // 상세 보기: 보고서 생성
-};
+// 계산이 비싸다(약 0.2초). 모듈이 VU마다 실행되므로 옵션을 읽는 처음(__VU === 0)에만 한다 — VU가 수천 개인 스트레스에서 준비가 몇 분씩 걸렸다.
+const LIMIT =
+  __VU === 0
+    ? {
+        chat_financial: sumP95(['extract']) + 1000, // 재무 비교·경쟁사 비교: 의도 추출만 LLM
+        chat_business: sumP95(['extract', 'embedding', 'business']) + 1000, // 사업의 내용: 추출 + 임베딩 + 답변
+        chat_transfer: sumP95(['extract']) + 1000, // 송금 요청: 의도 추출만 LLM
+        detail: sumP95(['report']) + 1000, // 상세 보기: 보고서 생성
+      }
+    : {};
 
 // 판정하는 실행(NFR-031)의 합격 기준. 올리는 구간(phase:warmup)은 판정에서 뺀다.
 const JUDGE = __ENV.JUDGE !== '0';
