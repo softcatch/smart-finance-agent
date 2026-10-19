@@ -17,7 +17,9 @@ const RUN_ID = __ENV.RUN_ID || String(Date.now());
 const PASSWORD = 'pw12345!'; // 시드 회원 공통
 const ACCOUNT_PASSWORD = '1234';
 if (!/^\d+s$/.test(WARMUP)) throw new Error(`WARMUP은 30s처럼 초 단위로 적는다: ${WARMUP}`);
+if (!/^\d+[sm]$/.test(DURATION)) throw new Error(`DURATION은 60s·3m처럼 적는다: ${DURATION}`);
 const WARMUP_MS = Number(WARMUP.slice(0, -1)) * 1000;
+const HOLD_MS = Number(DURATION.slice(0, -1)) * (DURATION.endsWith('m') ? 60000 : 1000);
 
 // 유형별 비율과 세션당 요청 수(개요 6절): 가중평균 5.65개
 const MIX = { dart: 0.5, transfer: 0.3, history: 0.15, signup: 0.05 };
@@ -125,9 +127,11 @@ const pick = (list) => list[Math.floor(Math.random() * list.length)];
 const accountNumber = (userNo) => String(100000000000 + userNo);
 const randomUser = () => 1 + Math.floor(Math.random() * USERS);
 
-// 올리는 구간(warmup)과 유지 구간(hold). 요청과 검사에 태그로 붙여 합격 판정에서 올리는 구간을 뺀다.
+// 올리는 구간(warmup), 유지 구간(hold), 유지가 끝난 뒤 진행 중인 세션이 마저 끝나기를 기다리는 구간(drain — 새 도착이
+// 없어 부하가 낮다). 요청과 검사에 태그로 붙여 합격 판정과 처리량이 유지 구간의 요청만 보게 한다.
 function phase() {
-  return exec.instance.currentTestRunDuration < WARMUP_MS ? 'warmup' : 'hold';
+  const t = exec.instance.currentTestRunDuration;
+  return t < WARMUP_MS ? 'warmup' : t < WARMUP_MS + HOLD_MS ? 'hold' : 'drain';
 }
 
 // 요청 하나. name은 경로 대신 쓰는 라벨(경로에 ID가 들어가 태그가 늘어나지 않게), kind는 합격 기준 묶음이다.
@@ -140,7 +144,7 @@ function call(method, path, body, ctx, name, kind, headers = {}) {
   return http.request(method, BASE + path, body === null ? null : JSON.stringify(body), params);
 }
 
-// 응답이 기대대로면 값을, 아니면 null을 돌려준다. 실패하면 세션을 끝낸다(뒤 요청이 의미 없다).
+// 응답이 기대대로면 값을, 아니면 null을 돌려준다. 로그인·대화 생성처럼 뒤 요청이 의미 없는 실패는 세션을 끝낸다.
 function ok(res, label, status = 200) {
   const isOk = (r) => {
     try {
@@ -183,9 +187,11 @@ export function dart() {
   const threadId = newThread(ctx);
   if (!threadId) return;
   think();
-  if (!chat(ctx, threadId, `${a}랑 ${b} 실적 비교해줘`, 'chat_financial')) return;
+  // 질문은 실패해도(읽기 제한 10초 등) 다음 요청을 보낸다 — 사용자는 다음 질문을 하고, 여기서 끝내면 느려질수록
+  // 세션당 요청이 줄어 목표 TPS보다 낮은 부하로 한계를 재게 된다.
+  chat(ctx, threadId, `${a}랑 ${b} 실적 비교해줘`, 'chat_financial');
   think();
-  if (!chat(ctx, threadId, `${a} 사업 내용 알려줘`, 'chat_business')) return;
+  chat(ctx, threadId, `${a} 사업 내용 알려줘`, 'chat_business');
   think();
   const last = chat(ctx, threadId, `${b} 경쟁사 비교해줘`, 'chat_financial');
   const detailId = last && last.json('data.detailId');
