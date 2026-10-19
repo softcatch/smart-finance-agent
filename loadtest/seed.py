@@ -6,6 +6,9 @@ Spring이 Flyway로 테이블을 만든 뒤에 돌린다(compose의 seed 서비�
 - DART 30곳: 회사, 재무(2025~2026, 합성 숫자), 사업의 내용 청크(합성 글, 임베딩은 가짜 LLM과 같은 함수).
   부하 테스트는 데이터의 모양과 양만 필요해서 숫자와 글은 지어낸 값이다.
 BCrypt 해시는 PostgreSQL pgcrypto로 만든다($2a$10$ 꼴이라 Spring의 BCryptPasswordEncoder가 읽는다).
+- SEED_HEAVY=1000,10000,…: 내역이 그만큼 많은 계정을 더한다(송금 내역 성능 테스트, NFR-030). 로그인 ID는 heavy1000처럼
+  heavy<건수>이고, 보낸 것과 받은 것이 반반이다. 다른 송금 SEED_FILLER건(기본 100만)과 섞어 넣는다.
+- SEED_DART=0: DART 데이터를 넣지 않는다(내역 테스트처럼 채팅이 필요 없을 때).
 """
 
 import os
@@ -17,6 +20,8 @@ from app.store import ensure_schema
 from loadtest.fake_llm import embedding_vector
 
 USERS = int(os.getenv("SEED_USERS", "10000"))
+HEAVY = [int(n) for n in os.getenv("SEED_HEAVY", "").split(",") if n]
+FILLER = int(os.getenv("SEED_FILLER", "1000000"))  # 큰 내역 계정 사이에 섞는 다른 송금 수
 PASSWORD = "pw12345!"
 ACCOUNT_PASSWORD = "1234"
 SENT_PER_USER = 30  # 받은 건수도 같다
@@ -108,6 +113,58 @@ def seed_members(conn: psycopg.Connection) -> None:
     print(f"회원 {USERS}명, 계좌 {USERS}개, 송금 내역 {USERS * SENT_PER_USER}건")
 
 
+def seed_heavy(conn: psycopg.Connection) -> None:
+    """내역이 많은 계정. 이 계정들의 송금을 다른 송금 SEED_FILLER건과 섞어서 넣는다.
+
+    ID가 이어진 한 덩어리로 넣으면 PK를 거꾸로 훑기만 해도 바로 찾아서 실제보다 빠르게 나온다. 실제 서비스에서는 한 사용자의
+    내역이 전체 송금 사이에 흩어져 있으므로, 건수만큼 자리를 정해 두고(순열) 나머지를 상대 송금으로 채운다.
+    """
+    if not HEAVY:
+        return
+    if conn.execute("SELECT 1 FROM member WHERE login_id = %s", (f"heavy{HEAVY[0]}",)).fetchone():
+        print("큰 내역 계정이 이미 있다 — 건너뜀")
+        return
+    conn.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
+    member_hash = conn.execute("SELECT crypt(%s, gen_salt('bf', 10))", (PASSWORD,)).fetchone()[0]
+    account_hash = conn.execute(
+        "SELECT crypt(%s, gen_salt('bf', 10))", (ACCOUNT_PASSWORD,)
+    ).fetchone()[0]
+    accounts = []
+    for index, n in enumerate(HEAVY):
+        account = f"{900000000000 + index}"
+        member_id = conn.execute(
+            "INSERT INTO member (login_id, password_hash, name) VALUES (%s, %s, %s) RETURNING id",
+            (f"heavy{n}", member_hash, f"내역{n}건"),
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO account (member_id, account_number, idempotency_key, balance, is_primary, "
+            "password_hash) VALUES (%s, %s, 'seed', 100000000, true, %s)",
+            (member_id, account, account_hash),
+        )
+        accounts.append(account)
+
+    total = sum(HEAVY) + FILLER
+    if total % 7919 == 0:  # 7919로 곱해 만드는 순열이 되려면 서로소여야 한다
+        total += 1
+    bound, owner = 0, []
+    for account, n in zip(accounts, HEAVY, strict=True):
+        bound += n
+        owner.append(f"WHEN u < {bound} THEN '{account}'")
+    pair = f"lpad((100000000000 + 1 + (g * {{k}}) % {USERS})::text, 12, '0')"
+    conn.execute(
+        f"INSERT INTO transfer (from_account_number, to_account_number, amount, created_at) "
+        f"SELECT CASE WHEN h IS NULL THEN f1 WHEN g % 2 = 0 THEN h ELSE f1 END, "
+        f"CASE WHEN h IS NULL THEN f2 WHEN g % 2 = 0 THEN f1 ELSE h END, "
+        f"1000 + g % 9000, now() - ({total} - g) * interval '1 second' "
+        f"FROM (SELECT g, CASE {' '.join(owner)} END AS h, {pair.format(k=7919)} AS f1, "
+        f"{pair.format(k=104729)} AS f2 "
+        f"FROM (SELECT g, (g * 7919 + 13) % {total} AS u FROM generate_series(1::bigint, {total}::bigint) g) q) r "
+        f"ORDER BY g"
+    )
+    conn.commit()
+    print(f"큰 내역 계정 {HEAVY}건, 섞은 송금 {total}건")
+
+
 def financial_rows(stock: str) -> list[tuple]:
     """한 회사의 재무 행. 분기 값(1~3분기·반기는 해당 분기 단독, 사업보고서는 연간)과 전년 동기 값을 지어낸다."""
     rng = random.Random(stock)
@@ -190,7 +247,9 @@ def seed_dart(conn: psycopg.Connection) -> None:
 def main() -> None:
     with connect() as conn:
         seed_members(conn)
-        seed_dart(conn)
+        seed_heavy(conn)
+        if os.getenv("SEED_DART", "1") != "0":
+            seed_dart(conn)
         conn.execute("ANALYZE")
         conn.commit()
 
