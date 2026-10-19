@@ -1,6 +1,7 @@
 // 전체 시나리오 부하 테스트(NFR-031): 행동 유형 4개를 DART 50·송금 30·내역 15·가입 5% 비율로 건다.
 // loadtest/run.sh가 실행한다. 환경변수: BASE_URL, TARGET_TPS(요청/초, 기본 93), DURATION(유지 시간, 기본 3m),
-// WARMUP(올리는 시간, 30s처럼 초 단위, 기본 30s), USERS(시드 회원 수), RUN_ID(가입 아이디가 겹치지 않게).
+// WARMUP(올리는 시간, 30s처럼 초 단위, 기본 30s), USERS(시드 회원 수), RUN_ID(가입 아이디가 겹치지 않게),
+// JUDGE(0이면 합격·불합격을 판정하지 않고 요청 이름별 지표만 남긴다 — 스트레스·실제 OpenAI 검증).
 // 세션은 열린 모델(constant 도착률)로 도착한다 — 서버가 느려져도 도착률이 줄지 않는다. 생각하는 시간은
 // 압축해서(0.3초) 세션이 오래 머물지 않게 한다. 요청 수는 개요 6절의 행동 유형 표와 같다.
 import http from 'k6/http';
@@ -24,8 +25,13 @@ const REQUESTS = { dart: 6, transfer: 6, history: 4, signup: 5 };
 const perSession = Object.keys(MIX).reduce((sum, type) => sum + MIX[type] * REQUESTS[type], 0);
 const sessionsPerSec = TARGET_TPS / perSession;
 
-function arrival(type, vus) {
-  const rate = Math.max(1, Math.round(sessionsPerSec * MIX[type] * 10)); // 10초당 세션 수(0.1/s 단위)
+// 세션이 머무는 시간(채팅은 LLM을 기다린다)의 대략값. VU를 미리 잡는 데만 쓴다. 도착률이 높아지면 VU도 같이 는다.
+const SESSION_SECONDS = { dart: 30, transfer: 15, history: 3, signup: 4 };
+
+function arrival(type) {
+  const perSec = sessionsPerSec * MIX[type];
+  const rate = Math.max(1, Math.round(perSec * 10)); // 10초당 세션 수(0.1/s 단위)
+  const vus = Math.max(10, Math.ceil(perSec * SESSION_SECONDS[type]));
   return {
     executor: 'ramping-arrival-rate',
     exec: type,
@@ -65,24 +71,42 @@ const LIMIT = {
   detail: sumP95(['report']) + 1000, // 상세 보기: 보고서 생성
 };
 
+// 판정하는 실행(NFR-031)의 합격 기준. 올리는 구간(phase:warmup)은 판정에서 뺀다.
+const JUDGE = __ENV.JUDGE !== '0';
+const judged = {
+  'http_req_duration{kind:api,phase:hold}': ['p(95)<500'],
+  'http_req_duration{name:chat_financial,phase:hold}': [`p(95)<${LIMIT.chat_financial}`],
+  'http_req_duration{name:chat_business,phase:hold}': [`p(95)<${LIMIT.chat_business}`],
+  'http_req_duration{name:chat_transfer,phase:hold}': [`p(95)<${LIMIT.chat_transfer}`],
+  'http_req_duration{name:detail,phase:hold}': [`p(95)<${LIMIT.detail}`],
+  'http_req_failed{phase:hold}': ['rate<0.01'],
+  'checks{phase:hold}': ['rate>0.99'],
+  dropped_iterations: ['count==0'], // 목표 도착률을 못 채우면(VU 한도) 한계에 걸린 것이다
+};
+
+// 판정하지 않는 실행(스트레스·실제 OpenAI 검증)은 요청 이름마다 지연·실패 지표를 남기려고 항상 통과하는 기준을 둔다
+// (k6는 기준이 걸린 하위 지표만 요약에 낸다).
+const NAMES = ['login', 'new_thread', 'accounts', 'transfers', 'confirm', 'signup', 'open_account', 'charge', 'alias',
+  'chat_financial', 'chat_business', 'chat_transfer', 'detail'];
+const recorded = {
+  'http_req_duration{kind:api,phase:hold}': ['p(95)<1000000000'],
+  'http_req_failed{phase:hold}': ['rate<=1'],
+  'checks{phase:hold}': ['rate>=0'],
+  dropped_iterations: ['count>=0'],
+};
+for (const name of NAMES) {
+  recorded[`http_req_duration{name:${name},phase:hold}`] = ['p(95)<1000000000'];
+  recorded[`http_req_failed{name:${name},phase:hold}`] = ['rate<=1'];
+}
+
 export const options = {
   scenarios: {
-    dart: arrival('dart', 250),
-    transfer: arrival('transfer', 80),
-    history: arrival('history', 10),
-    signup: arrival('signup', 10),
+    dart: arrival('dart'),
+    transfer: arrival('transfer'),
+    history: arrival('history'),
+    signup: arrival('signup'),
   },
-  thresholds: {
-    // 올리는 구간(phase:warmup)은 판정에서 뺀다
-    'http_req_duration{kind:api,phase:hold}': ['p(95)<500'],
-    'http_req_duration{name:chat_financial,phase:hold}': [`p(95)<${LIMIT.chat_financial}`],
-    'http_req_duration{name:chat_business,phase:hold}': [`p(95)<${LIMIT.chat_business}`],
-    'http_req_duration{name:chat_transfer,phase:hold}': [`p(95)<${LIMIT.chat_transfer}`],
-    'http_req_duration{name:detail,phase:hold}': [`p(95)<${LIMIT.detail}`],
-    'http_req_failed{phase:hold}': ['rate<0.01'],
-    'checks{phase:hold}': ['rate>0.99'],
-    dropped_iterations: ['count==0'], // 목표 도착률을 못 채우면(VU 한도) 한계에 걸린 것이다
-  },
+  thresholds: JUDGE ? judged : recorded,
   summaryTrendStats: ['avg', 'med', 'p(90)', 'p(95)', 'max'],
 };
 

@@ -14,13 +14,9 @@ DURATION=${2:-3m}
 RUN_ID=$(date +%Y%m%d-%H%M%S)
 OUT=loadtest/results/$RUN_ID
 mkdir -p "$OUT"
-DC="docker compose -p smart-loadtest -f compose.yaml -f loadtest/compose.yaml"
+source loadtest/lib.sh
 
-$DC down -v --remove-orphans >/dev/null 2>&1 || true
-SERVICES="db server ai fake-llm"
-[ "${MONITOR:-1}" = 1 ] && SERVICES="$SERVICES prometheus postgres-exporter cadvisor grafana"
-$DC up -d --build $SERVICES
-$DC --profile tools run --rm seed
+bring_up
 
 # 컨테이너별 CPU%·메모리를 3초마다 적는다(NFR-036 모니터링 전의 간단한 표본).
 (
@@ -33,15 +29,7 @@ $DC --profile tools run --rm seed
 STATS=$!
 trap 'kill $STATS 2>/dev/null || true' EXIT
 
-K6_OUT=()
-if [ "${MONITOR:-1}" = 1 ]; then
-  until curl -sf localhost:9090/-/ready >/dev/null; do sleep 1; done
-  export K6_PROMETHEUS_RW_SERVER_URL=http://localhost:9090/api/v1/write
-  export K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM=true # p95 게이지는 합칠 수 없어서 히스토그램으로 보낸다
-  export K6_PROMETHEUS_RW_PUSH_INTERVAL=5s
-  K6_OUT=(-o experimental-prometheus-rw)
-  echo "Grafana: http://localhost:3000"
-fi
+k6_monitor
 
 set +e
 k6 run ${K6_OUT[@]+"${K6_OUT[@]}"} -e TARGET_TPS="$TPS" -e DURATION="$DURATION" -e RUN_ID="$RUN_ID" \
