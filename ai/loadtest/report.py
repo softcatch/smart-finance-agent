@@ -62,7 +62,9 @@ NAMES = ["login", "new_thread", "accounts", "transfers", "confirm", "signup", "o
          "alias", "chat_financial", "chat_business", "chat_transfer", "detail"]  # fmt: skip
 
 
-def step_row(offered: int, summary: dict, hold_seconds: int, limits: dict[str, int]) -> dict:
+def step_row(
+    offered: int, summary: dict, hold_seconds: int, limits: dict[str, int], warmup_seconds: int = 0
+) -> dict:
     """스트레스 한 단계의 요약. 사업의 내용 채팅은 읽기 제한 때문에 부하와 무관하게 실패해서(#66) 실패율에서 뺀다."""
     failed = {n: counts(summary, n)[0] for n in NAMES}
     total = {n: failed[n] + counts(summary, n)[1] for n in NAMES}
@@ -77,6 +79,9 @@ def step_row(offered: int, summary: dict, hold_seconds: int, limits: dict[str, i
         "business_ok": f"{total['chat_business'] - failed['chat_business']}/{total['chat_business']}",
         "dropped": int(stat(summary, "dropped_iterations", "count") or 0),
     }
+    # 건 부하: 도착해야 했던 세션(올리는 구간은 0에서 선형으로 오르니 절반) 중 k6가 실제로 시작한 비율
+    scheduled = offered / REQUESTS_PER_SESSION * (warmup_seconds / 2 + hold_seconds)
+    row["arrived"] = max(0.0, 1 - row["dropped"] / scheduled)
     for name in ("chat_financial", "chat_transfer"):
         row[name] = stat(summary, f"http_req_duration{{name:{name},phase:hold}}", "p(95)")
     row["pass"] = (
@@ -118,22 +123,22 @@ def stress_report(folder: Path) -> str:
     rows = []
     for path in sorted(folder.glob("step-*.json"), key=tps_of):
         summary = json.loads(path.read_text(encoding="utf-8"))
-        rows.append(step_row(tps_of(path), summary, meta["hold"], limits))
+        rows.append(step_row(tps_of(path), summary, meta["hold"], limits, meta["warmup"]))
     lines = [
-        "| 목표 TPS | 요청/초 | 성공/초 | 일반 API p95 | 재무 채팅 p95 | 송금 채팅 p95 | 실패율(사업 제외) | 사업 채팅 성공 | 도착률 못 채움 | 기준 |",
+        "| 목표 TPS | 요청/초 | 성공/초 | 일반 API p95 | 재무 채팅 p95 | 송금 채팅 p95 | 실패율(사업 제외) | 사업 채팅 성공 | 건 부하 | 기준 |",
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rows:
         lines.append(
             f"| {r['offered']} | {r['requests_per_sec']:.1f} | {r['ok_per_sec']:.1f} | {ms(r['api_p95'])} | "
             f"{ms(r['chat_financial'])} | {ms(r['chat_transfer'])} | {r['fail_rate']:.1%} | {r['business_ok']} | "
-            f"{r['dropped']} | {'통과' if r['pass'] else '미달'} |"
+            f"{r['arrived']:.0%} | {'통과' if r['pass'] else '미달'} |"
         )
     limit = stress_limit(rows)
     best = max(rows, key=lambda r: r["ok_per_sec"])
     lines += [
         "",
-        f"기준: 일반 API p95 < {API_P95_MS}ms, 재무·송금 채팅 p95 < {limits['chat_financial']:,}ms, 실패율(사업의 내용 채팅 제외) < {ERROR_RATE:.0%}, 도착률을 채움.",
+        f"기준: 일반 API p95 < {API_P95_MS}ms, 재무·송금 채팅 p95 < {limits['chat_financial']:,}ms, 실패율(사업의 내용 채팅 제외) < {ERROR_RATE:.0%}, 도착률을 채움(건 부하 100%).",
         f"한계 TPS(기준을 지키는 마지막 단계): {limit if limit is not None else '첫 단계부터 미달'}",
         f"성공 처리량 최대: {best['ok_per_sec']:.1f}/초 (목표 {best['offered']} TPS 단계)",
     ]
@@ -142,9 +147,8 @@ def stress_report(folder: Path) -> str:
             f"최대 피크 집중도 역산: {peak_share(limit):.1%} (가정 {PEAK_SHARE:.1%}보다 {'크다 — 1대로 버팀' if peak_share(limit) > PEAK_SHARE else '작다 — 1대로 못 버팀'})"
         )
     for path in folder.glob("recovery-*.json"):  # 마지막 단계 뒤에 낮은 부하로 다시 돌린 결과
-        row = step_row(
-            tps_of(path), json.loads(path.read_text(encoding="utf-8")), meta["hold"], limits
-        )
+        summary = json.loads(path.read_text(encoding="utf-8"))
+        row = step_row(tps_of(path), summary, meta["hold"], limits, meta["warmup"])
         lines.append(
             f"마지막 단계 뒤 {row['offered']} TPS 재실행: 일반 API p95 {ms(row['api_p95'])}, 실패율 {row['fail_rate']:.1%} — "
             + ("기준 통과, 회복했다" if row["pass"] else "기준 미달, 회복하지 못했다")

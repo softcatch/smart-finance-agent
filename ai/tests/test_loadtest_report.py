@@ -128,7 +128,7 @@ def test_요청_이름의_실패와_성공_수를_센다():
 
 
 def test_스트레스_보고서는_한계_TPS와_회복을_적는다(tmp_path):
-    (tmp_path / "meta.json").write_text('{"hold": 60}', encoding="utf-8")
+    (tmp_path / "meta.json").write_text('{"hold": 60, "warmup": 15}', encoding="utf-8")
     good = {
         "failed": {},
         "ok": {"chat_financial": 100, "chat_transfer": 100, "login": 100},
@@ -148,3 +148,12 @@ def test_스트레스_보고서는_한계_TPS와_회복을_적는다(tmp_path):
     assert "한계 TPS(기준을 지키는 마지막 단계): 20" in report
     assert "마지막 단계 뒤 10 TPS 재실행" in report
     assert "회복했다" in report
+
+
+def test_건_부하는_도착해야_한_세션_중_실제로_시작한_비율이다():
+    summary = _summary(failed={}, ok={"login": 100}, p95={}, dropped=0)
+    assert step_row(113, summary, 60, LIMITS, warmup_seconds=15)["arrived"] == 1
+
+    # 113 TPS = 세션 20개/초 × (올리는 구간 7.5초 + 유지 60초) = 1,350개. 675개를 건너뛰면 50%
+    summary = _summary(failed={}, ok={"login": 100}, p95={}, dropped=675)
+    assert step_row(113, summary, 60, LIMITS, warmup_seconds=15)["arrived"] == pytest.approx(0.5)

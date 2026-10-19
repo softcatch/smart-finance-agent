@@ -25,8 +25,8 @@ const REQUESTS = { dart: 6, transfer: 6, history: 4, signup: 5 };
 const perSession = Object.keys(MIX).reduce((sum, type) => sum + MIX[type] * REQUESTS[type], 0);
 const sessionsPerSec = TARGET_TPS / perSession;
 
-// 세션이 머무는 시간(채팅은 LLM을 기다린다)의 대략값. VU를 미리 잡는 데만 쓴다. 서버가 막혀 세션이 길어지면 VU가 늘어나
-// 도착률을 지킨다(상한은 미리 잡은 수의 30배 — 상한에 닿으면 k6가 도착을 건너뛰고 dropped_iterations로 센다).
+// 세션이 머무는 시간(채팅은 LLM을 기다린다)의 대략값. 서버가 막히면 세션이 길어져 VU가 더 필요하다. VU를 도중에 만들면
+// 준비가 도착을 못 따라가 도착을 건너뛰므로(dropped_iterations) 3배를 미리 잡고, 상한은 30배다.
 const SESSION_SECONDS = { dart: 30, transfer: 15, history: 3, signup: 4 };
 
 function arrival(type) {
@@ -38,7 +38,7 @@ function arrival(type) {
     exec: type,
     startRate: 0,
     timeUnit: '10s',
-    preAllocatedVUs: vus,
+    preAllocatedVUs: vus * 3,
     maxVUs: vus * 30,
     stages: [
       { target: rate, duration: WARMUP },
