@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 송금 내역 목록 성능 테스트(NFR-030). 사용: [SIZES=1000,10000,100000] loadtest/history.sh [MODE=cursor]
 # db·server만 새로 띄우고 내역이 많은 계정(SIZES건)을 시드한 뒤 k6를 돌린다. 결과는 loadtest/results/<이름>/에 저장한다.
-# MODE=offset|all은 변형 패치(loadtest/variants/transfer-history.patch)를 적용한 서버에만 있다. 끝난 뒤 환경은 남겨 둔다:
+# REUSE=1이면 환경과 시드를 새로 만들지 않는다. MODE=offset|all은 변형 패치(loadtest/variants/transfer-history.patch)를 적용한 서버에만 있다. 끝난 뒤 환경은 남겨 둔다:
 #   docker compose -p smart-loadtest down -v
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -13,9 +13,13 @@ OUT=loadtest/results/history-$MODE-$(date +%Y%m%d-%H%M%S)
 mkdir -p "$OUT"
 DC="docker compose -p smart-loadtest -f compose.yaml -f loadtest/compose.yaml"
 
-$DC down -v --remove-orphans >/dev/null 2>&1 || true
-$DC up -d --build db server
-$DC --profile tools run --rm seed
+if [ "${REUSE:-0}" = 1 ]; then # 이미 띄운 환경과 시드를 그대로 쓴다(같은 데이터에서 MODE만 바꿔 비교할 때)
+  $DC up -d db server
+else
+  $DC down -v --remove-orphans >/dev/null 2>&1 || true
+  $DC up -d --build db server
+  $DC --profile tools run --rm seed
+fi
 
 # 깊이별 커서 — 큰 내역 계정마다 최신순 10·50·90·99% 지점의 송금 ID
 CURSORS=$PWD/$OUT/cursors.json

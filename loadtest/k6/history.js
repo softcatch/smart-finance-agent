@@ -63,7 +63,7 @@ export function run(data) {
   const rows = Math.floor(n * (DEPTHS[depth] || 0));
   let path = `/api/v1/transfers?size=${PAGE}`;
   if (MODE === 'cursor' && rows > 0) path += `&cursor=${CURSORS[n][depth]}`;
-  if (MODE === 'offset') path = `/api/v1/transfers/offset?size=${PAGE}&offset=${rows}`;
+  if (MODE === 'offset') path = `/api/v1/transfers/offset?size=${PAGE}&page=${Math.floor(rows / PAGE)}`;
   if (MODE === 'all') path = '/api/v1/transfers/all';
   const res = http.get(BASE + path, {
     headers: { Authorization: `Bearer ${token}` },
