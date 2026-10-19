@@ -1,0 +1,8 @@
+# 실제 OpenAI 검증(NFR-035) 오버레이: 가짜 LLM 대신 OpenAI를 부른다. lib.sh가 REAL_LLM=1일 때 loadtest/compose.yaml 뒤에 얹는다.
+# 돈이 든다 — 실행 전에 예상 비용을 적는다. 키는 .env의 OPENAI_API_KEY를 쓴다.
+services:
+  ai:
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_BASE_URL: https://api.openai.com/v1
+    depends_on: !reset {}

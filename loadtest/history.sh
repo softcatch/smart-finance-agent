@@ -11,7 +11,7 @@ SIZES=${SIZES:-1000,10000,100000}
 export SEED_HEAVY=$SIZES SEED_DART=0
 OUT=loadtest/results/history-$MODE-$(date +%Y%m%d-%H%M%S)
 mkdir -p "$OUT"
-DC="docker compose -p smart-loadtest -f compose.yaml -f loadtest/compose.yaml"
+source loadtest/lib.sh # DC
 
 if [ "${REUSE:-0}" = 1 ]; then # 이미 띄운 환경과 시드를 그대로 쓴다(같은 데이터에서 MODE만 바꿔 비교할 때)
   $DC up -d db server

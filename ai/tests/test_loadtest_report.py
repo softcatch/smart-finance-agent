@@ -9,10 +9,12 @@ from loadtest.report import (
     counts,
     history_report,
     peak_share,
+    scenario_report,
     step_row,
     stress_limit,
     stress_report,
     sum_p95,
+    token_cost,
 )
 
 LIMITS = {"chat_financial": 5196, "chat_transfer": 5196}
@@ -148,6 +150,21 @@ def test_스트레스_보고서는_한계_TPS와_회복을_적는다(tmp_path):
     assert "한계 TPS(기준을 지키는 마지막 단계): 20" in report
     assert "마지막 단계 뒤 10 TPS 재실행" in report
     assert "회복했다" in report
+
+
+def test_토큰_비용은_토큰_수와_단가의_곱이다():
+    assert token_cost({"input": 2_000_000, "output": 500_000}, 0.05, 0.40) == pytest.approx(0.30)
+    assert token_cost({}, 0.05, 0.40) == 0  # 지표가 없으면 0
+
+
+def test_시나리오_표는_요청_이름별_건수와_지연이다():
+    summary = _summary(failed={"login": 1}, ok={"login": 9}, p95={"login": 80})
+    summary["metrics"]["http_req_duration{name:login,phase:hold}"]["med"] = 60
+
+    table = scenario_report(summary, None, None).splitlines()
+
+    assert table[2] == "| login | 10 | 1 | 60ms | 80ms |"
+    assert len(table) == 3  # 건수가 0인 이름은 뺀다
 
 
 def test_건_부하는_도착해야_한_세션_중_실제로_시작한_비율이다():

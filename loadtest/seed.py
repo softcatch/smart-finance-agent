@@ -8,7 +8,8 @@ Spring이 Flyway로 테이블을 만든 뒤에 돌린다(compose의 seed 서비�
 BCrypt 해시는 PostgreSQL pgcrypto로 만든다($2a$10$ 꼴이라 Spring의 BCryptPasswordEncoder가 읽는다).
 - SEED_HEAVY=1000,10000,…: 내역이 그만큼 많은 계정을 더한다(송금 내역 성능 테스트, NFR-030). 로그인 ID는 heavy1000처럼
   heavy<건수>이고, 보낸 것과 받은 것이 반반이다. 다른 송금 SEED_FILLER건(기본 100만)과 섞어 넣는다.
-- SEED_DART=0: DART 데이터를 넣지 않는다(내역 테스트처럼 채팅이 필요 없을 때).
+- SEED_DART=0: DART 데이터를 넣지 않는다(내역 테스트처럼 채팅이 필요 없을 때, 또는 lib.sh의 DART_FROM_DEV가
+  개발 DB의 실데이터를 복사해 넣을 때). 빈 테이블은 항상 만든다.
 """
 
 import os
@@ -216,7 +217,6 @@ def chunk_rows(stock: str, name: str) -> list[tuple]:
 
 
 def seed_dart(conn: psycopg.Connection) -> None:
-    ensure_schema(conn)  # FastAPI 소유 테이블(회사·재무·청크)
     if conn.execute("SELECT count(*) FROM company").fetchone()[0] >= len(COMPANIES):
         print("DART 데이터가 이미 있다 — 건너뜀")
         return
@@ -248,6 +248,7 @@ def main() -> None:
     with connect() as conn:
         seed_members(conn)
         seed_heavy(conn)
+        ensure_schema(conn)  # FastAPI 소유 테이블(회사·재무·청크)
         if os.getenv("SEED_DART", "1") != "0":
             seed_dart(conn)
         conn.execute("ANALYZE")

@@ -3,7 +3,7 @@
 표준 라이브러리만 쓴다(호스트의 python3로 돈다).
     python3 ai/loadtest/report.py history <summary.json>
     python3 ai/loadtest/report.py stress <결과 폴더>            # step-<TPS>.json들과 meta.json
-    python3 ai/loadtest/report.py scenario <summary.json> [--prom http://localhost:9090 --window 5m]
+    python3 ai/loadtest/report.py scenario <summary.json> [--prom http://localhost:9090 [--price-in 0.05 --price-out 0.40]]
 """
 
 import argparse
@@ -171,14 +171,18 @@ def history_report(summary: dict) -> str:
 
 
 def prom_query(base: str, expr: str) -> dict[str, float]:
+    """즉시 질의. 키는 레이블 값(레이블 없는 합계는 빈 문자열)."""
     url = f"{base}/api/v1/query?" + urllib.parse.urlencode({"query": expr})
     result = json.load(urllib.request.urlopen(url, timeout=10))["data"]["result"]
-    return {
-        ",".join(f"{k}={v}" for k, v in r["metric"].items()): float(r["value"][1]) for r in result
-    }
+    return {",".join(r["metric"].values()): float(r["value"][1]) for r in result}
 
 
-def scenario_report(summary: dict, prom: str | None, window: str) -> str:
+def token_cost(tokens: dict[str, float], price_in: float, price_out: float) -> float:
+    """토큰 수 × 단가(USD/백만 토큰). 추론 토큰은 출력에 들어 있다."""
+    return (tokens.get("input", 0) * price_in + tokens.get("output", 0) * price_out) / 1e6
+
+
+def scenario_report(summary: dict, prom: str | None, prices: tuple[float, float] | None) -> str:
     lines = ["| 요청 | 건수 | 실패 | p50 | p95 |", "|---|---|---|---|---|"]
     for name in NAMES:
         failed, ok = counts(summary, name)
@@ -187,14 +191,20 @@ def scenario_report(summary: dict, prom: str | None, window: str) -> str:
             lines.append(
                 f"| {name} | {failed + ok} | {failed} | {ms(stat(summary, lat, 'med'))} | {ms(stat(summary, lat, 'p(95)'))} |"
             )
-    if prom:  # OpenAI 오류는 우리 에러(요청 실패)와 따로 센다
-        errors = prom_query(prom, f"sum by (type) (increase(openai_errors_total[{window}]))")
-        calls = prom_query(prom, f"sum(increase(llm_call_seconds_count[{window}]))")
+    if prom:  # 환경을 매번 새로 띄우므로 카운터 값이 곧 이번 실행의 합계다. OpenAI 오류는 우리 에러(요청 실패)와 따로 센다
+        errors = prom_query(prom, "sum by (type) (openai_errors_total)")
+        calls = prom_query(prom, "sum(llm_call_seconds_count)").get("", 0)
+        tokens = prom_query(prom, "sum by (direction) (llm_tokens_total)")
         lines += [
             "",
-            f"OpenAI 오류(종류별, {window}): {errors or '없음'}",
-            f"LLM 호출 수({window}): {calls or '-'}",
+            f"OpenAI 오류(종류별, 429는 RateLimitError): {errors or '없음'}",
+            f"LLM 호출 수: {calls:.0f}",
+            f"LLM 토큰: 입력 {tokens.get('input', 0):,.0f}, 출력 {tokens.get('output', 0):,.0f}",
         ]
+        if prices:
+            lines.append(
+                f"토큰 비용(단가 입력·출력 ${prices[0]}·${prices[1]}/백만 토큰): ${token_cost(tokens, *prices):.4f}"
+            )
     return "\n".join(lines)
 
 
@@ -203,17 +213,18 @@ def main() -> None:
     parser.add_argument("kind", choices=["history", "stress", "scenario"])
     parser.add_argument("path")
     parser.add_argument("--prom")
-    parser.add_argument("--window", default="5m")
+    parser.add_argument("--price-in", type=float, help="입력 토큰 단가(USD/백만 토큰)")
+    parser.add_argument("--price-out", type=float, help="출력 토큰 단가(USD/백만 토큰)")
     args = parser.parse_args()
     if args.kind == "stress":
         print(stress_report(Path(args.path)))
         return
     summary = json.loads(Path(args.path).read_text(encoding="utf-8"))
-    print(
-        history_report(summary)
-        if args.kind == "history"
-        else scenario_report(summary, args.prom, args.window)
-    )
+    if args.kind == "history":
+        print(history_report(summary))
+    else:
+        prices = (args.price_in, args.price_out) if args.price_in and args.price_out else None
+        print(scenario_report(summary, args.prom, prices))
 
 
 if __name__ == "__main__":
