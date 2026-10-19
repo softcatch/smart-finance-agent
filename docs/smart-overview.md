@@ -331,7 +331,7 @@ LLM은 "우리 서버의 한계를 재는가, 실제 사용자 경험을 확인�
   - 부하 시나리오에 나오는 턴은 가짜가 실제와 −4%~+13% 안이다. p95는 사업의 내용·상세 보고서가 ±10% 안이고, 재무 비교는 가짜가 낮았다(4.2초 vs 5.3~7.0초 — 20회라 p95는 꼬리 한두 개에 좌우된다).
   - 일반 답변 턴은 가짜가 35~58% 느리다. 분포에는 답이 긴 질문("예금과 적금의 차이가 뭐야?" 3.7초)이 섞여 있어, "안녕"(1.6초)처럼 짧은 질문이 많은 묶음보다 느리게 나온다. 일반 질문은 부하 시나리오에 없다.
   - 처음 분포(사업의 내용을 숫자 질문으로 쟀을 때)로 비교하면 사업의 내용 턴이 −29%·−34%, 상세 보고서가 −14%·−26%로 가짜가 빨랐다. 질문 꼴을 맞춰 다시 재고 실측 직후에 비교한 것이 위 표다.
-- **OpenAI 429**(실제 구간): 우리 에러와 분리 집계, 재시도 없음. 실행 전 예상 비용(호출 수 × 토큰 단가)을 기록한다.
+- **OpenAI 429**(실제 구간): 우리 에러와 분리 집계, 재시도 없음. 실행 전 예상 비용(호출 수 × 토큰 단가)을 기록한다 — 아래 '성능 측정'의 실제 OpenAI 검증.
 - **추론 강도**(`OPENAI_REASONING_EFFORT`): gpt-5-nano로 호출당 지연을 실제로 쟀다 — 기본(medium) 4~11초, low 약 2.7초, minimal 약 1.2초. minimal은 의도 추출을 자주 놓쳐(13건 중 3건) low를 기본으로 쓴다. 송금 발화 평가 세트는 이후에 같은 방식으로 잰다.
 - **측정 환경**(NFR-037, `loadtest/`): 앱(Spring·FastAPI·PostgreSQL)만 t3.small 사양으로 제한하고, k6·Prometheus·Grafana는 제한 밖에 둔다.
   - `loadtest/compose.yaml`이 기본 compose 위에 얹는 오버레이다. 앱 세 개를 같은 코어 2개(`cpuset: "0,1"`)에 묶어 t3.small의 2 vCPU처럼 서로 경쟁시키고, 메모리는 합쳐서 2GiB다(Spring 1GiB·`-Xmx512m`, FastAPI 512MiB, PostgreSQL 512MiB). 가짜 LLM(`ai/loadtest/`)은 다른 코어에, k6는 호스트에서 돈다. 개발 환경과 섞이지 않게 compose 프로젝트·이미지 이름을 따로 쓴다(`smart-loadtest`).
@@ -372,7 +372,7 @@ cAdvisor (컨테이너 CPU·메모리) ─────────────�
 
 - **구현**(NFR-036): 위 그림 그대로다. Prometheus·Grafana·postgres-exporter·cAdvisor는 `loadtest/compose.yaml`에서 앱 제한(코어 2개) 밖의 코어 6~9에서 돈다. `loadtest/run.sh`가 함께 띄우고 k6 결과를 `experimental-prometheus-rw`로 같은 Prometheus에 밀어 넣는다(끄려면 `MONITOR=0`). k6 지연은 p95 게이지가 아니라 native 히스토그램으로 보낸다 — p95 게이지는 라벨별로 따로 계산돼 합칠 수 없고, 히스토그램이어야 이름별 전체 요청의 p95를 구한다(k6 요약의 p95와 같은 실행에서 일반 API 89.5ms vs 92ms, 재무 채팅 5.50초 vs 5.61초로 맞았다). Grafana는 `http://localhost:3000`(로그인 없음, 로컬 전용 포트)이고, 환경을 띄우면 대시보드 "부하 테스트"(패널 16개)가 provisioning으로 홈 화면에 올라온다. 위에서부터 k6 → Spring → FastAPI → PostgreSQL → 컨테이너이고 시간축이 모두 같다.
   - Spring: `micrometer-registry-prometheus` 의존성 하나만 앱에 들어간다. 지표는 측정 환경에서만 `loadtest` 프로파일(`application-loadtest.properties`)로 연다 — `/actuator/prometheus`, 요청 지연 히스토그램, Tomcat 스레드 지표. 기본 설정에서는 열리지 않는다(테스트가 확인한다).
-  - FastAPI: `/metrics`(내부망 전용). async라서 동기 스레드풀이 가득 차도 읽힌다. `http_request_seconds`(경로·상태별 지연), `http_requests_in_flight`(처리 중, 스레드를 기다리는 요청 포함), `threadpool_borrowed`·`threadpool_limit`(동기 엔드포인트 스레드풀), `chat_node_seconds`(노드별), `llm_call_seconds`(ok·error), `embedding_call_seconds`, `openai_errors_total`(종류별), `guard_decisions_total`(채팅·상세, 코드별).
+  - FastAPI: `/metrics`(내부망 전용). async라서 동기 스레드풀이 가득 차도 읽힌다. `http_request_seconds`(경로·상태별 지연), `http_requests_in_flight`(처리 중, 스레드를 기다리는 요청 포함), `threadpool_borrowed`·`threadpool_limit`(동기 엔드포인트 스레드풀), `chat_node_seconds`(노드별), `llm_call_seconds`(ok·error), `llm_tokens_total`(입력·출력, 실제 OpenAI의 비용 계산용), `embedding_call_seconds`, `openai_errors_total`(종류별), `guard_decisions_total`(채팅·상세, 코드별).
   - PostgreSQL: postgres-exporter의 커넥션(상태별)과 락, 그리고 추가 질의로 락 대기 수(`pg_lock_waiting_waiting`).
   - 컨테이너: cAdvisor. Docker Desktop(containerd 스토리지)에서는 cAdvisor가 컨테이너 이름을 읽지 못해(`failed to identify the read-write layer ID`) 서비스마다 `cgroup_parent: /lt-<서비스>`를 주고 그 이름으로 CPU·메모리를 본다.
 - **병목이 화면에서 보이는지**(2026-10-16, `run.sh` 93 TPS 2분, 앱 2 vCPU·2GiB, 가짜 LLM): 부하 테스트 첫 결과의 병목이 대시보드에 그대로 나왔다. 요청 실패율 22.7%, 채팅 성공은 재무 84/1,123·송금 40/661·사업의 내용 17/70, 일반 API p95 99ms로 첫 결과와 같다.
@@ -381,7 +381,7 @@ cAdvisor (컨테이너 CPU·메모리) ─────────────�
   - CPU(코어 수, 앱 한도 2): Spring 최대 1.21, FastAPI 0.20, PostgreSQL 0.19. 노드별 p95는 사업의 내용 약 9초, 의도 추출 약 4.8초다.
 - **모니터링 오버헤드**(30 TPS, 90초 유지, 켬·끔 각 1회): 처리량은 같고(요청 2,734 vs 2,749) 일반 API p95는 171ms vs 161ms(+6%), 평균 CPU는 Spring 56% vs 47%(코어 +0.09개), FastAPI 11% vs 10%, PostgreSQL 7% vs 7%였다. 한 번씩 잰 값이라 잡음 안이다.
 
-### 성능 측정(NFR-030·032)
+### 성능 측정(NFR-030·032·035)
 
 시스템은 바꾸지 않고 지금 코드를 잰 **기준선**이다. 개선은 별도 이슈에서 같은 도구로 전후를 비교한다. 모두 측정 환경(앱 2 vCPU·2GiB, 위 측정 환경 절)에서 쟀고, 결과 파일은 `loadtest/results/`(커밋하지 않음)에 남는다.
 
@@ -389,6 +389,7 @@ cAdvisor (컨테이너 CPU·메모리) ─────────────�
 |---|---|---|
 | 송금 내역 목록(NFR-030) | `[SIZES=1000,10000,100000] loadtest/history.sh [cursor\|offset\|all]` | `python3 ai/loadtest/report.py history <summary.json>` |
 | 스트레스(NFR-032) | `[HOLD=60s] loadtest/stress.sh ["5 10 15 …"]` | 끝에 자동으로 출력, `<결과 폴더>/report.md` |
+| 실제 OpenAI(NFR-035) | `[REAL_LLM=1] DART_FROM_DEV=1 JUDGE=0 loadtest/run.sh 9.3 5m` | `python3 ai/loadtest/report.py scenario <summary.json> --prom http://localhost:9090 --price-in 0.05 --price-out 0.40` |
 
 **송금 내역 목록 — 전체 조회 → 오프셋 → 커서**(NFR-030, 2026-10-20)
 
@@ -463,6 +464,11 @@ cAdvisor (컨테이너 CPU·메모리) ─────────────�
 - **극단 652 TPS(DAU 전원 동시)**: k6가 도착률의 87%를 걸었다(VU 준비가 도착을 못 따라가 일부를 건너뜀). 서버는 죽지 않았다 — 컨테이너 재시작 0회, 메모리 부족 종료 없음. 요청은 k6 제한시간(60초)까지 밀려 일반 API p95가 60초, 실패율 36%였고 성공 요청은 초당 48개였다. 부하를 끊고 5 TPS를 다시 걸면 기준을 다시 통과했다(일반 API p95 142ms, 실패 0). 한 단계가 끝난 뒤 밀린 요청이 모두 끝나 서버가 한가해지는 데는 10초 안팎(93 TPS까지)과 70~100초(186 TPS 이상)가 걸렸다.
 - **관찰: FastAPI 메모리가 시간에 따라 계속 오른다.** 대화 상태를 프로세스 메모리(`InMemorySaver`)에 둬서, 17~21 TPS 25분 동안 163MiB → 414MiB로 올랐다(분당 약 10MiB, 대화 하나에 약 60KB로 추정). 40분짜리 첫 계단 실행에서는 한도 512MiB 근처(약 500MiB)에서 멈췄고 죽지는 않았다. 하루 단위의 지속 부하에서는 이 한도가 먼저 문제될 수 있어 개선 후보에 추가한다(대화 상태를 DB나 Redis로).
 - **한계**: 단계마다 한 번씩 잰 값이다(유지 60초, 한계 근처만 180초 확인). 사업의 내용 채팅의 실패는 부하와 무관한 읽기 제한 때문이라 한계 판정에서 뺐다. 개발 머신(Docker Desktop)이라 t3.small의 CPU 크레딧은 재현하지 않는다. '무엇이 먼저 무너지나' 표는 첫 계단 실행에서 뽑은 값이다(186 TPS는 그때 도착률 86%).
+
+**실제 OpenAI 검증**(NFR-035, 2026-10-20)
+
+- **조건**: 전체 시나리오를 목표 TPS의 10%(9.3 TPS)로 5분(올리기 30초는 따로) 걸고, 실제 OpenAI(gpt-5-nano·추론 강도 low)와 가짜 LLM에서 각각 돌려 판정 없이 기록한다(`JUDGE=0`). 두 실행 모두 같은 시드이고, DART 데이터는 합성이 아니라 개발 DB의 실데이터(30곳, 사업의 내용 청크 2,528개)를 복사해 썼다(`DART_FROM_DEV=1`) — 합성 청크로는 실제 모델이 근거 없음으로 짧게 답해 지연이 달라질 수 있다. LLM 호출은 재시도하지 않고(`max_retries=0`) 429는 FastAPI의 `openai_errors_total{type="RateLimitError"}`로 우리 에러(k6의 요청 실패)와 따로 센다.
+- **실행 전 예상 비용: 약 $0.4(상한 $0.6).** 작은 파일럿(`REAL_LLM=1`, 3 TPS, 2분)을 먼저 실제 OpenAI로 돌려 토큰을 쟀다 — LLM 호출 197회, 입력 301,175·출력 108,290 토큰(호출당 평균 1,529·550), 비용 $0.058, OpenAI 오류 없음. 본 실행은 LLM이 들어가는 세션(DART 분석형·송금형)이 파일럿의 6.55배(파일럿 약 63개 → 본 실행 약 410개)라서 $0.058 × 6.55 ≈ $0.38이다. 단가는 OpenAI 모델 페이지(2026-10-20 확인)의 gpt-5-nano 입력 $0.05·출력 $0.40/백만 토큰이다. 추론 토큰은 출력에 들어 있고, 캐시된 입력 할인과 임베딩 비용($0.02/백만 토큰, 질문 한 줄)은 반영하지 않았다(상한 쪽).
 
 ### E2E 테스트(JSP 화면)
 
