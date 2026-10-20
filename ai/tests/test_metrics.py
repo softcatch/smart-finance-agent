@@ -1,9 +1,13 @@
+from uuid import uuid4
+
 import httpx
 import openai
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
+from langchain_core.messages import AIMessage
+from langchain_core.outputs import ChatGeneration, LLMResult
 from langchain_core.runnables import RunnableLambda
 from prometheus_client import REGISTRY
 
@@ -94,3 +98,19 @@ def test_임베딩_호출은_시간을_세고_OpenAI_오류는_종류별로_센�
         embed_texts(["삼성전자 사업"])
 
     assert _value("openai_errors_total", type="APIConnectionError") == errors + 1
+
+
+def test_LLM_토큰을_입력과_출력으로_센다():
+    usage = {"input_tokens": 120, "output_tokens": 30, "total_tokens": 150}
+    result = LLMResult(
+        generations=[[ChatGeneration(message=AIMessage(content="응답", usage_metadata=usage))]]
+    )
+    before = (
+        _value("llm_tokens_total", direction="input"),
+        _value("llm_tokens_total", direction="output"),
+    )
+
+    LlmMetrics().on_llm_end(result, run_id=uuid4())
+
+    assert _value("llm_tokens_total", direction="input") == before[0] + 120
+    assert _value("llm_tokens_total", direction="output") == before[1] + 30

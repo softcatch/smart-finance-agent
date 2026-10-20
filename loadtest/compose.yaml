@@ -65,6 +65,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       SEED_USERS: ${SEED_USERS:-10000}
+      SEED_HEAVY: ${SEED_HEAVY:-}
+      SEED_FILLER: ${SEED_FILLER:-1000000}
+      SEED_DART: ${SEED_DART:-1}
     volumes:
       - ./loadtest:/loadtest:ro
       - ./ai/loadtest:/app/loadtest:ro
