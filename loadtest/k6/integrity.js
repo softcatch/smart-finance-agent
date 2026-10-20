@@ -8,7 +8,6 @@
 // dup 받는 쪽 2R+1…3R, 동시 출금 받는 쪽 3R+1…(3+P)R. 시드의 SEED_USERS가 그만큼 있어야 한다.
 import http from 'k6/http';
 import exec from 'k6/execution';
-import { check } from 'k6';
 import { Counter } from 'k6/metrics';
 
 const BASE = __ENV.BASE_URL || 'http://localhost:8080';
@@ -51,7 +50,12 @@ export function setup() {
       const loginId = 'load' + String(senderNo(i)).padStart(6, '0');
       calls.push(['POST', `${BASE}/api/v1/auth/login`, JSON.stringify({ loginId, password: PASSWORD }), { headers: json }]);
     }
-    for (const res of http.batch(calls)) tokens.push(res.json('data.accessToken'));
+    for (const res of http.batch(calls)) {
+      // 로그인이 실패한 채 이어가면 송금이 하나도 없는데 SQL 판정이 '위반 없음'으로 끝난다
+      const token = res.status === 200 && res.json('data.accessToken');
+      if (!token) throw new Error(`로그인 실패(${res.status}) — 시드한 회원 수와 ROUNDS가 맞는지 본다`);
+      tokens.push(token);
+    }
   }
   return tokens;
 }
@@ -62,7 +66,7 @@ function createRequest(token, recipientNo, amount) {
     JSON.stringify({ recipientAccountNumber: accountNumber(recipientNo), amount }),
     { headers: { ...json, Authorization: `Bearer ${token}` }, tags: { name: 'create' } },
   );
-  check(res, { '송금 요청 생성': (r) => r.status < 300 });
+  if (res.status >= 300) exec.test.abort(`송금 요청 생성 실패(${res.status})`);
   return res.json('data.requestId');
 }
 
