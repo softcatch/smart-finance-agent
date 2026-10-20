@@ -8,6 +8,7 @@ from loadtest.report import (
     REQUESTS_PER_SESSION,
     counts,
     history_report,
+    integrity_report,
     peak_share,
     scenario_report,
     step_row,
@@ -150,6 +151,30 @@ def test_스트레스_보고서는_한계_TPS와_회복을_적는다(tmp_path):
     assert "한계 TPS(기준을 지키는 마지막 단계): 20" in report
     assert "마지막 단계 뒤 10 TPS 재실행" in report
     assert "회복했다" in report
+
+
+def test_정합성_보고서는_성공_수와_위반_건수를_적는다(tmp_path):
+    def k6(ok, expected, rejected, error):
+        counters = {"confirm_ok": ok, "confirm_expected": expected}
+        counters |= {"confirm_rejected": rejected, "confirm_error": error}
+        metrics = {name: {"count": count} for name, count in counters.items()}
+        metrics["http_reqs{name:confirm}"] = {"count": 1000, "rate": 123.4}
+        metrics["http_req_duration{name:confirm}"] = {"p(95)": 812.0}
+        return json.dumps({"metrics": metrics})
+
+    (tmp_path / "dup.json").write_text(k6(1000, 100, 0, 0), encoding="utf-8")
+    (tmp_path / "overdraw.json").write_text(k6(300, 300, 700, 0), encoding="utf-8")
+    checks = {"mode": "none", "sum_diff": 270000, "duplicates": 900, "negative": 0}
+    (tmp_path / "checks.json").write_text(json.dumps(checks), encoding="utf-8")
+
+    report = integrity_report(tmp_path)
+
+    assert "| 같은 요청ID 연타 | 1000 | 100 | 0 | 0 | 123.4 | 812ms |" in report
+    assert "| 같은 계좌 동시 출금 | 300 | 300 | 700 | 0 | 123.4 | 812ms |" in report
+    assert "합계 차이 +270,000원, 중복 확정 900건, 음수 잔액 0개 — 위반 있음" in report
+    checks["sum_diff"], checks["duplicates"] = 0, 0
+    (tmp_path / "checks.json").write_text(json.dumps(checks), encoding="utf-8")
+    assert integrity_report(tmp_path).endswith("위반 없음")
 
 
 def test_토큰_비용은_토큰_수와_단가의_곱이다():
