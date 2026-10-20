@@ -1,0 +1,176 @@
+diff --git a/server/src/main/java/com/softcatch/smart/account/Account.java b/server/src/main/java/com/softcatch/smart/account/Account.java
+index 0f915b8..46acafc 100644
+--- a/server/src/main/java/com/softcatch/smart/account/Account.java
++++ b/server/src/main/java/com/softcatch/smart/account/Account.java
+@@ -59,6 +59,11 @@ public class Account {
+     return isPrimary;
+   }
+ 
++  // 측정용 변형(loadtest/variants/transfer-confirm.patch): 읽고-계산하고-쓰는 확정이 잔액을 직접 쓴다.
++  public void setBalance(Long balance) {
++    this.balance = balance;
++  }
++
+   void markPrimary() {
+     this.isPrimary = true;
+   }
+diff --git a/server/src/main/java/com/softcatch/smart/account/AccountRepository.java b/server/src/main/java/com/softcatch/smart/account/AccountRepository.java
+index f1447a7..476dcf9 100644
+--- a/server/src/main/java/com/softcatch/smart/account/AccountRepository.java
++++ b/server/src/main/java/com/softcatch/smart/account/AccountRepository.java
+@@ -1,8 +1,10 @@
+ package com.softcatch.smart.account;
+ 
++import jakarta.persistence.LockModeType;
+ import java.util.List;
+ import java.util.Optional;
+ import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Lock;
+ import org.springframework.data.jpa.repository.Modifying;
+ import org.springframework.data.jpa.repository.Query;
+ 
+@@ -18,6 +20,10 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
+ 
+   Optional<Account> findByAccountNumber(String accountNumber);
+ 
++  // 측정용 변형(loadtest/variants/transfer-confirm.patch): FOR UPDATE.
++  @Lock(LockModeType.PESSIMISTIC_WRITE)
++  Optional<Account> findForUpdateByAccountNumber(String accountNumber);
++
+   // UPDATE 자체가 원자적이라 동시 충전도 잠금 없이 안전하다.
+   // clearAutomatically=true — 벌크 UPDATE 후 1차 캐시를 비워, 뒤이은 조회가 옛 값을 반환하지 않게 한다.
+   @Modifying(clearAutomatically = true)
+diff --git a/server/src/main/java/com/softcatch/smart/transfer/TransferRequest.java b/server/src/main/java/com/softcatch/smart/transfer/TransferRequest.java
+index fcc4579..e05fea7 100644
+--- a/server/src/main/java/com/softcatch/smart/transfer/TransferRequest.java
++++ b/server/src/main/java/com/softcatch/smart/transfer/TransferRequest.java
+@@ -66,6 +66,11 @@ public class TransferRequest {
+     return amount;
+   }
+ 
++  // 측정용 변형(loadtest/variants/transfer-confirm.patch)
++  void markUsed() {
++    this.used = true;
++  }
++
+   public boolean isUsed() {
+     return used;
+   }
+diff --git a/server/src/main/java/com/softcatch/smart/transfer/TransferRequestRepository.java b/server/src/main/java/com/softcatch/smart/transfer/TransferRequestRepository.java
+index e3bc310..4962a2e 100644
+--- a/server/src/main/java/com/softcatch/smart/transfer/TransferRequestRepository.java
++++ b/server/src/main/java/com/softcatch/smart/transfer/TransferRequestRepository.java
+@@ -1,7 +1,9 @@
+ package com.softcatch.smart.transfer;
+ 
++import jakarta.persistence.LockModeType;
+ import java.util.Optional;
+ import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Lock;
+ import org.springframework.data.jpa.repository.Modifying;
+ import org.springframework.data.jpa.repository.Query;
+ 
+@@ -9,6 +11,10 @@ public interface TransferRequestRepository extends JpaRepository<TransferRequest
+ 
+   Optional<TransferRequest> findByRequestId(String requestId);
+ 
++  // 측정용 변형(loadtest/variants/transfer-confirm.patch): FOR UPDATE.
++  @Lock(LockModeType.PESSIMISTIC_WRITE)
++  Optional<TransferRequest> findForUpdateByRequestId(String requestId);
++
+   // 아직 안 쓴 요청만 선점 — 두 확정 요청이 동시에 와도 하나만 1행을 얻는다(중복 확정 방지).
+   @Modifying(clearAutomatically = true)
+   @Query(
+diff --git a/server/src/main/java/com/softcatch/smart/transfer/TransferService.java b/server/src/main/java/com/softcatch/smart/transfer/TransferService.java
+index f77883f..7bb2796 100644
+--- a/server/src/main/java/com/softcatch/smart/transfer/TransferService.java
++++ b/server/src/main/java/com/softcatch/smart/transfer/TransferService.java
+@@ -18,6 +18,7 @@ import java.time.LocalDate;
+ import java.time.ZoneId;
+ import java.util.List;
+ import java.util.UUID;
++import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.data.domain.Pageable;
+ import org.springframework.security.crypto.password.PasswordEncoder;
+ import org.springframework.stereotype.Service;
+@@ -36,6 +37,10 @@ class TransferService {
+   private static final int DEFAULT_PAGE_SIZE = 20;
+   private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+ 
++  // 측정용 변형(loadtest/variants/transfer-confirm.patch): main(기본) | none(잠금 없음) | lock(FOR UPDATE).
++  @Value("${transfer.confirm-mode:main}")
++  private String confirmMode;
++
+   private final TransferRequestRepository transferRequests;
+   private final TransferRepository transfers;
+   private final AccountRepository accounts;
+@@ -113,6 +118,9 @@ class TransferService {
+   // 뺀다. 다른 예외(잔액 부족 등)는 지금처럼 전부 롤백한다.
+   @Transactional(noRollbackFor = PasswordMismatchException.class)
+   TransferConfirmResponse confirm(Long callerMemberId, String requestId, String password) {
++    if (!"main".equals(confirmMode)) {
++      return confirmVariant(callerMemberId, requestId, password);
++    }
+     TransferRequest request =
+         transferRequests
+             .findByRequestId(requestId)
+@@ -167,6 +175,59 @@ class TransferService {
+         balanceAfter);
+   }
+ 
++  // 측정용 변형: 요청과 계좌를 읽고, 계산하고, 쓴다. none은 잠금이 없고 lock은 읽을 때 FOR UPDATE를 건다.
++  private TransferConfirmResponse confirmVariant(
++      Long callerMemberId, String requestId, String password) {
++    boolean lock = "lock".equals(confirmMode);
++    TransferRequest request =
++        (lock
++                ? transferRequests.findForUpdateByRequestId(requestId)
++                : transferRequests.findByRequestId(requestId))
++            .filter(r -> r.getSenderMemberId().equals(callerMemberId))
++            .orElseThrow(() -> new ApiException(ErrorCode.TRANSFER_REQUEST_NOT_FOUND));
++    if (Instant.now().isAfter(request.getExpiresAt())) {
++      throw new ApiException(ErrorCode.TRANSFER_REQUEST_EXPIRED);
++    }
++    if (request.isUsed()) {
++      throw new ApiException(ErrorCode.TRANSFER_REQUEST_ALREADY_USED);
++    }
++    request.markUsed();
++
++    Account from = findAccount(request.getFromAccountNumber(), lock);
++    if (!from.getMemberId().equals(callerMemberId)) {
++      throw new ApiException(ErrorCode.ACCOUNT_NOT_OWNED);
++    }
++    if (!passwordEncoder.matches(password == null ? "" : password, from.getPasswordHash())) {
++      throw new PasswordMismatchException();
++    }
++    Account to = findAccount(request.getRecipientAccountNumber(), lock);
++    if (from.getBalance() < request.getAmount()) {
++      throw new ApiException(ErrorCode.INSUFFICIENT_BALANCE);
++    }
++    from.setBalance(from.getBalance() - request.getAmount());
++    to.setBalance(to.getBalance() + request.getAmount());
++
++    Transfer saved =
++        transfers.save(
++            new Transfer(
++                request.getFromAccountNumber(),
++                request.getRecipientAccountNumber(),
++                request.getAmount()));
++    return new TransferConfirmResponse(
++        saved.getId(),
++        request.getRecipientName(),
++        request.getAmount(),
++        request.getFromAccountNumber(),
++        from.getBalance());
++  }
++
++  private Account findAccount(String accountNumber, boolean lock) {
++    return (lock
++            ? accounts.findForUpdateByAccountNumber(accountNumber)
++            : accounts.findByAccountNumber(accountNumber))
++        .orElseThrow();
++  }
++
+   private void decreaseThenIncrease(Long fromAccountId, Long toAccountId, Long amount) {
+     if (accounts.decreaseBalanceIfSufficient(fromAccountId, amount) == 0) {
+       throw new ApiException(ErrorCode.INSUFFICIENT_BALANCE);

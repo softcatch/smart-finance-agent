@@ -1,8 +1,9 @@
-"""부하 테스트 결과 보고(NFR-030·032·035). k6 요약(--summary-export)을 표로 만들고 스트레스의 한계 TPS를 구한다.
+"""부하 테스트 결과 보고(NFR-030·032·034·035). k6 요약(--summary-export)을 표로 만들고 스트레스의 한계 TPS를 구한다.
 
 표준 라이브러리만 쓴다(호스트의 python3로 돈다).
     python3 ai/loadtest/report.py history <summary.json>
     python3 ai/loadtest/report.py stress <결과 폴더>            # step-<TPS>.json들과 meta.json
+    python3 ai/loadtest/report.py integrity <결과 폴더>          # dup.json·overdraw.json·checks.json
     python3 ai/loadtest/report.py scenario <summary.json> [--prom http://localhost:9090 [--price-in 0.05 --price-out 0.40]]
 """
 
@@ -170,6 +171,35 @@ def history_report(summary: dict) -> str:
     return "\n".join(lines)
 
 
+COUNTERS = ["confirm_ok", "confirm_expected", "confirm_rejected", "confirm_error"]
+
+
+def integrity_report(folder: Path) -> str:
+    checks = json.loads((folder / "checks.json").read_text(encoding="utf-8"))
+    lines = [
+        f"방식: {checks['mode']}",
+        "",
+        "| 시나리오 | 확정 성공 | 기대 | 거절(4xx) | 오류(5xx) | 확정 요청/초 | 확정 p95 |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for name, label in (("dup", "같은 요청ID 연타"), ("overdraw", "같은 계좌 동시 출금")):
+        summary = json.loads((folder / f"{name}.json").read_text(encoding="utf-8"))
+        n = {c: stat(summary, c, "count") or 0 for c in COUNTERS}
+        rate = stat(summary, "http_reqs{name:confirm}", "rate") or 0
+        p95 = stat(summary, "http_req_duration{name:confirm}", "p(95)")
+        lines.append(
+            f"| {label} | {n['confirm_ok']} | {n['confirm_expected']} | {n['confirm_rejected']} | "
+            f"{n['confirm_error']} | {rate:.1f} | {ms(p95)} |"
+        )
+    violations = {k: checks[k] for k in ("sum_diff", "duplicates", "negative")}
+    lines += [
+        "",
+        f"전체 잔액 합계 차이 {violations['sum_diff']:+,}원, 중복 확정 {violations['duplicates']}건, 음수 잔액 {violations['negative']}개 — "
+        + ("위반 있음" if any(violations.values()) else "위반 없음"),
+    ]
+    return "\n".join(lines)
+
+
 def prom_query(base: str, expr: str) -> dict[str, float]:
     """즉시 질의. 키는 레이블 값(레이블 없는 합계는 빈 문자열)."""
     url = f"{base}/api/v1/query?" + urllib.parse.urlencode({"query": expr})
@@ -210,14 +240,15 @@ def scenario_report(summary: dict, prom: str | None, prices: tuple[float, float]
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("kind", choices=["history", "stress", "scenario"])
+    parser.add_argument("kind", choices=["history", "stress", "integrity", "scenario"])
     parser.add_argument("path")
     parser.add_argument("--prom")
     parser.add_argument("--price-in", type=float, help="입력 토큰 단가(USD/백만 토큰)")
     parser.add_argument("--price-out", type=float, help="출력 토큰 단가(USD/백만 토큰)")
     args = parser.parse_args()
-    if args.kind == "stress":
-        print(stress_report(Path(args.path)))
+    if args.kind in ("stress", "integrity"):
+        report = stress_report if args.kind == "stress" else integrity_report
+        print(report(Path(args.path)))
         return
     summary = json.loads(Path(args.path).read_text(encoding="utf-8"))
     if args.kind == "history":
