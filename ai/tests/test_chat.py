@@ -1041,10 +1041,13 @@ def test_답변_숫자가_공시_본문에_있으면_통과한다():
 
     assert out["guard"] == "PASS"
     assert out["reply"].startswith("수주잔고는 1,000억원입니다.\n\n출처")
+    assert out["query"] is None  # 통과하면 재검색하지 않는다
 
 
-def test_답변_숫자가_근거에_없으면_고정_문장과_출처만_나가고_기록에_안_남는다():
-    llm, seen = _says("수주잔고는 1,500억원입니다.", "네")
+def test_재검색해도_숫자가_근거에_없으면_고정_문장과_출처만_나가고_기록에_안_남는다():
+    llm, seen = _says(
+        "수주잔고는 1,500억원입니다.", "수주잔고 현황", "수주잔고는 1,500억원입니다.", "네"
+    )
     graph = build_graph(
         llm,
         _extractor(
@@ -1061,12 +1064,76 @@ def test_답변_숫자가_근거에_없으면_고정_문장과_출처만_나가�
 
     assert out["guard"] == "NUMBER_UNVERIFIED"
     assert out["reply"].startswith(OUTPUT_REPLIES["NUMBER_UNVERIFIED"] + "\n\n출처\n- 삼성전자")
-    assert all("1,500" not in m for m in seen[1])  # 믿을 수 없는 숫자가 다음 턴에 가지 않는다
+    assert len(seen) == 4  # 답변·재작성·재답변(재검색은 한 번뿐) + 다음 턴
+    assert all("1,500" not in m for m in seen[3])  # 믿을 수 없는 숫자가 다음 턴에 가지 않는다
+
+
+def test_숫자가_근거에_없으면_고친_검색어로_한_번_더_찾고_통과하면_그_답변이_나간다():
+    llm, seen = _says(
+        "수주잔고는 1,500억원입니다.", "수주총액 수주잔고", "수주총액은 2,000억원입니다."
+    )
+    calls = []
+
+    def search(names, question):  # 고친 검색어로 찾으면 정답 청크가 나온다
+        calls.append(question)
+        content = "수주총액 2,000억원" if question == "수주총액 수주잔고" else "연구개발비 300억원"
+        section = "4. 매출 및 수주상황" if question == "수주총액 수주잔고" else "6. 주요계약"
+        return [("005930", "삼성전자")], [], {"005930": [_chunk(content, section)]}
+
+    out = build_graph(llm, _business("삼성전자")).invoke(
+        {"message": "삼성전자 수주 규모"}, _cfg("th_1", search_business=search)
+    )
+
+    assert calls == ["삼성전자 수주 규모", "수주총액 수주잔고"]
+    assert seen[1][-1] == "삼성전자 수주 규모"  # 재작성은 원래 질문을 받는다
+    assert seen[2][-1] == "삼성전자 수주 규모"  # 재답변도 원래 질문에 답한다
+    assert "수주총액 2,000억원" in seen[2][0]
+    assert out["guard"] == "PASS"
+    assert out["reply"].startswith("수주총액은 2,000억원입니다.\n\n출처")
+    assert "4. 매출 및 수주상황" in out["reply"]
+    assert "6. 주요계약" not in out["reply"]  # 첫 검색의 출처는 남지 않는다
+
+
+def test_투자_권유와_근거_없는_숫자가_함께_있으면_재검색하지_않고_ADVICE로_막는다():
+    llm, seen = _says("수주잔고 1,500억원이니 지금 매수하세요")
+    calls = []
+
+    def search(names, question):
+        calls.append(question)
+        return [("005930", "삼성전자")], [], {"005930": [_chunk("수주잔고 1,000억원")]}
+
+    out = build_graph(llm, _business("삼성전자")).invoke(
+        {"message": "삼성전자 수주잔고"}, _cfg("th_1", search_business=search)
+    )
+
+    assert out["guard"] == "ADVICE"
+    assert out["reply"] == OUTPUT_REPLIES["ADVICE"]
+    assert len(calls) == 1 and len(seen) == 1  # 재작성·재검색 없음
+
+
+def test_재검색에서_DB를_못_읽으면_안내가_그대로_나간다():
+    llm, _ = _says("수주잔고는 1,500억원입니다.", "수주잔고 현황")
+    calls = []
+
+    def search(names, question):
+        calls.append(question)
+        if len(calls) == 2:
+            raise psycopg.OperationalError
+        return [("005930", "삼성전자")], [], {"005930": [_chunk("수주잔고 1,000억원")]}
+
+    out = build_graph(llm, _business("삼성전자")).invoke(
+        {"message": "삼성전자 수주잔고"}, _cfg("th_1", search_business=search)
+    )
+
+    assert out["guard"] == "PASS"  # 첫 답변의 미확인 숫자가 안내 문장에 붙지 않는다
+    assert out["reply"] == "사업의 내용을 지금 읽을 수 없습니다. 잠시 후 다시 시도해 주세요."
 
 
 def test_질문에만_있는_숫자는_근거가_아니다():
     # 사용자가 공시에 없는 숫자를 넣어 "맞아?"라고 물어도, 모델이 그대로 확인해 주면 막아야 한다
-    llm, _ = _says("네, 수주잔고는 999,999억원입니다.")
+    llm, _ = _says(
+        "네, 수주잔고는 999,999억원입니다.", "수주잔고", "네, 수주잔고는 999,999억원입니다."
+    )
     graph = build_graph(llm, _business("삼성전자"))
 
     out = graph.invoke(
@@ -1087,7 +1154,12 @@ def test_일반_답변은_숫자를_대조하지_않는다():
 
 
 def test_숫자_판정은_턴마다_새로_한다():
-    llm, _ = _says("수주잔고는 1,500억원입니다.", "수주잔고는 1,000억원입니다.")
+    llm, _ = _says(
+        "수주잔고는 1,500억원입니다.",
+        "수주잔고",
+        "수주잔고는 1,500억원입니다.",
+        "수주잔고는 1,000억원입니다.",
+    )
     graph = build_graph(
         llm,
         _extractor(
@@ -1102,6 +1174,7 @@ def test_숫자_판정은_턴마다_새로_한다():
 
     assert first["guard"] == "NUMBER_UNVERIFIED"
     assert second["guard"] == "PASS"  # 지난 턴의 미확인 목록이 남지 않는다
+    assert second["query"] is None  # 재검색 여부도 턴마다 새로 정한다
 
 
 def _post(message: str, graph, thread_id: str = "th_1"):
@@ -1124,6 +1197,26 @@ def test_엔드포인트는_판정_코드와_노드별_시간을_로그로_남�
     assert (thread_id, guard) == ("th_1", "PASS")
     assert list(node_ms) == ["input_guard", "extract", "answer", "output_guard"]  # 실행 순서
     assert all(isinstance(ms, int) and ms >= 0 for ms in node_ms.values())
+
+
+def test_같은_노드를_두_번_지나면_시간을_더한다(monkeypatch):
+    # 스트림만 흉내 낸 그래프: business → rewrite → business. 노드마다 시계가 1초씩 간다.
+    class Looping:
+        def stream(self, *_, **__):
+            yield from [
+                ("updates", {"business": {}}),
+                ("updates", {"rewrite": {}}),
+                ("updates", {"business": {}}),
+                ("values", {"reply": "답", "guard": "PASS"}),
+            ]
+
+    calls = []
+    monkeypatch.setattr("app.main.log_chat", lambda *args: calls.append(args))
+    monkeypatch.setattr("app.main.perf_counter", iter(range(10)).__next__)
+
+    _post("삼성전자 수주잔고", Looping())
+
+    assert calls[0][2] == {"business": 2000, "rewrite": 1000}
 
 
 def test_막힌_요청도_판정_코드가_로그에_남는다(monkeypatch):

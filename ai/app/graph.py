@@ -7,7 +7,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 
-from app.business import ASK_BUSINESS_COMPANY, answer_business, source_lines
+from app.business import ASK_BUSINESS_COMPANY, answer_business, rewrite_query, source_lines
 from app.financial import ASK_COMPANY, MAX_COMPANIES, build_table, find_competitors
 from app.guard import (
     CANARY,
@@ -53,6 +53,7 @@ NOT_FOUND_REPLY = "계좌나 별칭을 찾을 수 없습니다. 받는 분의 �
 # is_business: 이번 턴이 사업의 내용 질문인지(기업 이름은 companies를 함께 쓴다).
 # detail: 이번 답변의 상세 보기 조건({kind, stocks}). 재무 비교 표가 나갈 때만 채우고, 턴마다 비운다.
 # footer: 답변 끝에 붙이는 줄(출처 등 코드가 만든 것). unverified: 답변 숫자 중 근거에 없는 것. 둘 다 턴마다 비운다.
+# query: 재검색(NFR-052)에 쓴 검색어. None이면 이번 턴에 아직 재검색하지 않았다. 턴마다 비운다.
 # 근거 텍스트(공시 블록)는 상태에 두지 않는다 — 체크포인터에 쌓이지 않게 노드 안에서 대조한다.
 class ChatState(MessagesState, total=False):
     message: str
@@ -70,10 +71,12 @@ class ChatState(MessagesState, total=False):
     detail: dict | None
     footer: str
     unverified: list[str]
+    query: str | None
 
 
 # 입력 가드 → (인젝션이면 바로 종료) → 의도·값 추출 → 일반 답변 | 되묻기 | 송금 요청 생성 | 내역 조회 | 재무 비교
 # | 사업의 내용 답변. LLM이 쓴 답변(일반·사업의 내용)은 출력 가드를 거쳐 나간다.
+# 사업의 내용 답변에 근거 없는 숫자가 있으면 검색어를 고쳐 한 번 더 검색·답변한다(턴마다 1회, NFR-052).
 # LLM·추출기를 인자로 받아 테스트에서 가짜를 넣는다. 추출기를 안 주면 llm의 구조화 출력을 쓴다.
 # 대화 기록은 체크포인터가 thread_id별로 들고 있다 — invoke할 때 config에 thread_id를 넘긴다.
 # Spring 호출 함수는 config["configurable"]의 create_transfer·get_history로 받는다(JWT를 쥔 함수).
@@ -92,6 +95,7 @@ def build_graph(llm: BaseChatModel, extractor=None):
                 "detail": None,
                 "footer": "",
                 "unverified": [],
+                "query": None,
             }
         return {
             "messages": [HumanMessage(message)],
@@ -101,6 +105,7 @@ def build_graph(llm: BaseChatModel, extractor=None):
             "detail": None,
             "footer": "",
             "unverified": [],
+            "query": None,
         }
 
     def extract(state: ChatState) -> ChatState:
@@ -219,14 +224,14 @@ def build_graph(llm: BaseChatModel, extractor=None):
 
     # 사업의 내용 답변: 기업을 찾고 그 회사 청크를 검색해(검색 함수) 공시 본문만 근거로 요약한다.
     # 본문은 이번 호출의 시스템 프롬프트로만 넘기고 messages에는 남기지 않는다(기록이 불어나지 않게).
-    # 출처는 LLM이 쓰지 않고 검색 결과로 코드가 붙인다.
+    # 출처는 LLM이 쓰지 않고 검색 결과로 코드가 붙인다. 재검색이면 고친 검색어로 찾는다(답변은 원래 질문에).
     def business(state: ChatState, config: RunnableConfig) -> ChatState:
         names = state.get("companies") or []
         if not names:
             return {"reply": ASK_BUSINESS_COMPANY}
-        question = state["messages"][-1].content
+        query = state.get("query") or state["messages"][-1].content
         try:
-            companies, missing, chunks = config["configurable"]["search_business"](names, question)
+            companies, missing, chunks = config["configurable"]["search_business"](names, query)
         except psycopg.errors.UndefinedTable:  # 수집 전(DART 키가 없으면 테이블도 아직 없다)
             return {
                 "reply": "사업의 내용이 아직 수집되지 않았습니다. 수집이 끝난 뒤 다시 물어봐 주세요."
@@ -248,6 +253,11 @@ def build_graph(llm: BaseChatModel, extractor=None):
             footer += f"\n답변하지 못한 기업: {', '.join(skipped)}"
         return {"reply": reply, "footer": footer, "unverified": unverified_numbers(reply, evidence)}
 
+    # 재검색 전 단계: 검색어만 고치고, 첫 답변의 출처·미확인 숫자는 비운다(다시 찾은 결과로 새로 정한다).
+    def rewrite(state: ChatState) -> ChatState:
+        query = rewrite_query(llm, state["messages"][-1].content)
+        return {"query": query, "footer": "", "unverified": []}
+
     # LLM이 쓴 답변은 여기를 거쳐야 나간다. 걸리면 고정 문장으로 바꾸고, 기록에도 바뀐 문장만 남긴다.
     # footer(출처 등 코드가 만든 줄)는 통과했거나 숫자만 못 믿을 때 붙인다 — 원문을 확인할 수 있게.
     def output_guard(state: ChatState) -> ChatState:
@@ -266,6 +276,12 @@ def build_graph(llm: BaseChatModel, extractor=None):
             return "financial"
         return "business" if state.get("is_business") else "answer"
 
+    # 출력 가드와 같은 판정으로 숫자만 걸렸을 때 재검색한다(유출·투자 권유가 먼저면 그대로 가드로).
+    def after_business(state: ChatState) -> str:
+        code = check_output(state["reply"], state.get("unverified"))
+        retry = code == "NUMBER_UNVERIFIED" and state.get("query") is None
+        return "rewrite" if retry else "output_guard"
+
     graph = StateGraph(ChatState)
     graph.add_node("input_guard", input_guard)
     graph.add_node("extract", extract)
@@ -275,6 +291,7 @@ def build_graph(llm: BaseChatModel, extractor=None):
     graph.add_node("history", history)
     graph.add_node("financial", financial)
     graph.add_node("business", business)
+    graph.add_node("rewrite", rewrite)
     graph.add_node("output_guard", output_guard)
     graph.add_edge(START, "input_guard")
     graph.add_conditional_edges(
@@ -286,7 +303,8 @@ def build_graph(llm: BaseChatModel, extractor=None):
     graph.add_edge("create_request", END)
     graph.add_edge("history", END)
     graph.add_edge("financial", END)
-    graph.add_edge("business", "output_guard")
+    graph.add_conditional_edges("business", after_business)
+    graph.add_edge("rewrite", "business")
     graph.add_edge("output_guard", END)
     # ponytail: 메모리 체크포인터 — 워커 1개 기준, 재시작하면 기록이 사라진다. 문제가 확인되면 PostgreSQL.
     return graph.compile(checkpointer=InMemorySaver())

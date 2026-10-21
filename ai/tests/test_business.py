@@ -7,6 +7,7 @@ from app.business import (
     chunk_lines,
     disclosure_blocks,
     extract_business,
+    rewrite_query,
     source_lines,
 )
 
@@ -247,3 +248,22 @@ def test_공시_블록을_시스템_프롬프트로_넘기고_근거를_함께_�
     assert seen[0][-1] is question
     assert evidence == disclosure_blocks(FOUND, {"005930": [_chunk()]})  # 근거 = 공시 블록뿐
     assert "삼성전자 사업 내용" not in evidence  # 질문은 근거가 아니다
+
+
+def test_재작성은_질문만_받아_검색어_한_줄을_돌려준다():
+    seen = []
+
+    def fake(messages):
+        seen.append(messages)
+        return AIMessage("  삼성바이오로직스 수주총액 수주잔고\n")
+
+    query = rewrite_query(RunnableLambda(fake), "삼성바이오로직스 수주 계약 규모 알려줘")
+
+    assert query == "삼성바이오로직스 수주총액 수주잔고"
+    assert seen[0][-1].content == "삼성바이오로직스 수주 계약 규모 알려줘"
+
+
+def test_재작성이_비면_질문을_그대로_쓴다():
+    query = rewrite_query(RunnableLambda(lambda _: AIMessage(" ")), "케이티 무선 가입자 수")
+
+    assert query == "케이티 무선 가입자 수"
