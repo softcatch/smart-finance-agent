@@ -1,7 +1,7 @@
 import re
 from html.parser import HTMLParser
 
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import OpenAIEmbeddings
 from openai import OpenAIError
 
@@ -222,3 +222,18 @@ def answer_business(
     data = disclosure_blocks(found, chunks)
     ai = llm.invoke([SystemMessage(BUSINESS_PROMPT.format(data=data)), *messages])
     return ai.content, data
+
+
+# --- 재검색(NFR-052) ---
+REWRITE_PROMPT = (
+    "사용자 질문으로 공시 'II. 사업의 내용'을 검색했지만 답변의 숫자를 본문에서 확인하지 못했다. "
+    "본문은 '매출 및 수주상황', '생산능력 및 생산실적', '주요계약', '연구개발활동' 같은 소제목과 "
+    "표로 쓰여 있다. 질문을 그 본문에서 찾기 쉬운 검색어 한 줄로 고쳐 쓴다. 비슷한 표기와 표 항목 "
+    "이름을 함께 넣고 기업 이름은 그대로 둔다. 검색어만 답한다."
+)
+
+
+# 질문 → 검색어 한 줄. 검색에만 쓰고 답변 근거는 아니다. 빈 답이면 질문 그대로.
+def rewrite_query(llm, question: str) -> str:
+    ai = llm.invoke([SystemMessage(REWRITE_PROMPT), HumanMessage(question)])
+    return ai.content.strip() or question
