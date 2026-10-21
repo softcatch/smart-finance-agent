@@ -1126,6 +1126,26 @@ def test_엔드포인트는_판정_코드와_노드별_시간을_로그로_남�
     assert all(isinstance(ms, int) and ms >= 0 for ms in node_ms.values())
 
 
+def test_같은_노드를_두_번_지나면_시간을_더한다(monkeypatch):
+    # 스트림만 흉내 낸 그래프: business → rewrite → business. 노드마다 시계가 1초씩 간다.
+    class Looping:
+        def stream(self, *_, **__):
+            yield from [
+                ("updates", {"business": {}}),
+                ("updates", {"rewrite": {}}),
+                ("updates", {"business": {}}),
+                ("values", {"reply": "답", "guard": "PASS"}),
+            ]
+
+    calls = []
+    monkeypatch.setattr("app.main.log_chat", lambda *args: calls.append(args))
+    monkeypatch.setattr("app.main.perf_counter", iter(range(10)).__next__)
+
+    _post("삼성전자 수주잔고", Looping())
+
+    assert calls[0][2] == {"business": 2000, "rewrite": 1000}
+
+
 def test_막힌_요청도_판정_코드가_로그에_남는다(monkeypatch):
     calls = []
     monkeypatch.setattr("app.main.log_chat", lambda *args: calls.append(args))

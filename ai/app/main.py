@@ -175,6 +175,7 @@ def chat(
         }
     }
     # 노드가 끝날 때마다 걸린 시간을 잰다(updates). 마지막 values가 최종 상태다.
+    # 같은 노드를 두 번 지나면(재검색, NFR-052) 시간을 더한다.
     node_ms: dict[str, int] = {}
     out: dict = {}
     last = perf_counter()
@@ -184,7 +185,7 @@ def chat(
         if mode == "updates":
             now = perf_counter()
             node = next(iter(chunk))
-            node_ms[node] = round((now - last) * 1000)
+            node_ms[node] = node_ms.get(node, 0) + round((now - last) * 1000)
             NODE_SECONDS.labels(node).observe(now - last)
             last = now
         else:
