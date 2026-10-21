@@ -1094,6 +1094,23 @@ def test_숫자가_근거에_없으면_고친_검색어로_한_번_더_찾고_�
     assert "6. 주요계약" not in out["reply"]  # 첫 검색의 출처는 남지 않는다
 
 
+def test_투자_권유와_근거_없는_숫자가_함께_있으면_재검색하지_않고_ADVICE로_막는다():
+    llm, seen = _says("수주잔고 1,500억원이니 지금 매수하세요")
+    calls = []
+
+    def search(names, question):
+        calls.append(question)
+        return [("005930", "삼성전자")], [], {"005930": [_chunk("수주잔고 1,000억원")]}
+
+    out = build_graph(llm, _business("삼성전자")).invoke(
+        {"message": "삼성전자 수주잔고"}, _cfg("th_1", search_business=search)
+    )
+
+    assert out["guard"] == "ADVICE"
+    assert out["reply"] == OUTPUT_REPLIES["ADVICE"]
+    assert len(calls) == 1 and len(seen) == 1  # 재작성·재검색 없음
+
+
 def test_재검색에서_DB를_못_읽으면_안내가_그대로_나간다():
     llm, _ = _says("수주잔고는 1,500억원입니다.", "수주잔고 현황")
     calls = []

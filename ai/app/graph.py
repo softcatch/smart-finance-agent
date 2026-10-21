@@ -276,8 +276,10 @@ def build_graph(llm: BaseChatModel, extractor=None):
             return "financial"
         return "business" if state.get("is_business") else "answer"
 
+    # 출력 가드와 같은 판정으로 숫자만 걸렸을 때 재검색한다(유출·투자 권유가 먼저면 그대로 가드로).
     def after_business(state: ChatState) -> str:
-        retry = state.get("unverified") and state.get("query") is None
+        code = check_output(state["reply"], state.get("unverified"))
+        retry = code == "NUMBER_UNVERIFIED" and state.get("query") is None
         return "rewrite" if retry else "output_guard"
 
     graph = StateGraph(ChatState)
