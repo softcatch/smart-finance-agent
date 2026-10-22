@@ -1,3 +1,5 @@
+import base64
+import json
 from typing import ClassVar
 
 import psycopg
@@ -119,3 +121,26 @@ def test_로그를_못_써도_예외가_나가지_않는다(monkeypatch):
     monkeypatch.setattr(main, "_connect", down)
 
     real_log_chat("th_1", "PASS", {})  # 채팅은 로그 때문에 실패하지 않는다
+
+
+def _bearer(claims: dict) -> str:
+    # Spring이 보내는 JWT 모양(헤더.payload.서명, 패딩 없는 base64url). 서명은 FastAPI가 보지 않는다.
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
+    return f"Bearer eyJhbGciOiJIUzI1NiJ9.{payload}.c2ln"
+
+
+def test_JWT의_sub에서_회원_ID를_읽는다():
+    assert main.member_id(_bearer({"sub": "7", "exp": 1790000000})) == 7
+
+
+def test_회원_ID를_못_읽으면_None():
+    broken = [
+        None,  # Authorization 헤더 없음
+        "Bearer t",  # JWT 모양이 아님
+        "Bearer a.!!!.c",  # payload가 base64가 아님
+        _bearer({"exp": 1}),  # sub 없음
+        _bearer({"sub": "abc"}),  # 숫자가 아님
+        "Bearer a." + base64.urlsafe_b64encode(b"[1]").decode() + ".c",  # payload가 객체가 아님
+    ]
+
+    assert [main.member_id(value) for value in broken] == [None] * len(broken)

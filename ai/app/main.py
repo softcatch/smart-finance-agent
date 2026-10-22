@@ -1,3 +1,5 @@
+import base64
+import json
 import os
 from functools import lru_cache, partial
 from time import perf_counter
@@ -148,6 +150,15 @@ def issue_detail(detail: dict) -> str | None:
     except psycopg.Error:
         return None
     return detail_id
+
+
+# Spring이 이미 서명을 확인해 넘긴 JWT의 sub(회원 ID). 내부 전용이라 서명은 다시 보지 않는다. 못 읽으면 None.
+def member_id(authorization: str | None) -> int | None:
+    try:
+        payload = (authorization or "").removeprefix("Bearer ").split(".")[1]
+        return int(json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["sub"])
+    except (IndexError, ValueError, KeyError, TypeError):
+        return None
 
 
 class ChatRequest(BaseModel):
