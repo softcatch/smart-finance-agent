@@ -4,6 +4,13 @@ import secrets
 # 안전 판정은 LLM이 아니라 파이썬 규칙으로 한다.
 _CARD = re.compile(r"(?<!\d)\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}(?!\d)")
 _RRN = re.compile(r"(?<!\d)\d{6}-?[1-4]\d{6}(?!\d)")
+# 전화번호(NFR-055): 휴대전화(010 등, 국가번호 +82 허용)와 지역번호 유선전화. 구분은 하이픈·점·공백이다.
+# 앞뒤로 숫자나 하이픈이 더 붙은 긴 숫자열(계좌번호·날짜) 안쪽은 건드리지 않는다.
+_PHONE = re.compile(
+    r"(?<![\d-])(?:\+82[-.\s]?)?(?:0?1[016789]|0[2-6]\d?)[-.\s]?\d{3,4}[-.\s]?\d{4}(?![\d-])"
+)
+# 이메일: 뒤에 붙은 조사(예: ...com으로)까지 삼키지 않게 ASCII 문자만 쓴다.
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", re.ASCII)
 _INJECTION = re.compile(
     r"이전\s*(지시|명령|지침)\S*\s*(을|를)?\s*(모두\s*)?(무시|잊)"
     r"|ignore\s+(all\s+)?(the\s+)?(previous|prior|above)\s+instructions"
@@ -12,9 +19,11 @@ _INJECTION = re.compile(
 )
 
 
-# 카드번호(16자리)를 먼저 가려야 주민번호 규칙이 그 앞 13자리를 잘못 잡지 않는다.
+# LLM이 몰라도 되는 값은 지운다(되돌리지 않는다). 카드번호(16자리)를 먼저 가려야 주민번호 규칙이 그 앞 13자리를
+# 잘못 잡고, 이메일을 전화번호보다 먼저 가려야 주소 안의 숫자가 전화번호로 잘리지 않는다.
 def mask_pii(text: str) -> str:
-    return _RRN.sub("[주민번호]", _CARD.sub("[카드번호]", text))
+    text = _RRN.sub("[주민번호]", _CARD.sub("[카드번호]", text))
+    return _PHONE.sub("[전화번호]", _EMAIL.sub("[이메일]", text))
 
 
 def is_injection(text: str) -> bool:
