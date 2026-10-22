@@ -193,7 +193,9 @@ def chat(
             "get_history": partial(get_transfer_history, token),
             "compare_financials": compare_financials,
             "search_business": search_business,
-        }
+        },
+        # 이 요청의 LLM 호출마다 이 사용자의 사용량을 남긴다(NFR-054). 그래프 안의 호출까지 이어진다.
+        "metadata": {"user_id": member_id(authorization)},
     }
     # 노드가 끝날 때마다 걸린 시간을 잰다(updates). 마지막 values가 최종 상태다.
     # 같은 노드를 두 번 지나면(재검색, NFR-052) 시간을 더한다.
@@ -226,7 +228,11 @@ def chat(
 # 상세 보기(I-02, FR-016): 클릭할 때 저장해 둔 분석 조건으로 전체 표와 보고서를 만든다.
 # 표는 코드가 계산하고, 보고서는 표의 값으로만 쓰며 출력 가드를 거친다. 걸리면 고정 문장이고 표는 그대로 준다.
 @app.get("/internal/details/{detail_id}")
-def detail(detail_id: str, llm: Annotated[Any, Depends(get_llm)]):
+def detail(
+    detail_id: str,
+    llm: Annotated[Any, Depends(get_llm)],
+    authorization: Annotated[str | None, Header()] = None,
+):
     with _connect() as conn:
         condition = load_detail(conn, detail_id)
         if condition is None:
@@ -246,7 +252,9 @@ def detail(detail_id: str, llm: Annotated[Any, Depends(get_llm)]):
     table = build_detail_table(companies, rows)
     if table is None:
         return {"success": True, "data": {"report": NO_DATA_REPORT}, "error": None}
-    report, evidence = write_report(llm, table)
+    report, evidence = write_report(
+        llm.with_config(metadata={"user_id": member_id(authorization)}), table
+    )
     code = check_output(report, unverified_numbers(report, evidence))
     GUARD.labels("detail", code).inc()
     if code != "PASS":  # 표에는 '아래 출처'가 없어 숫자 판정 문장만 표 기준으로 바꾼다

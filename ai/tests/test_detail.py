@@ -1,12 +1,14 @@
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
 from app import main
 from app.financial import NO_DATA_REPORT, REPORT_UNVERIFIED, build_detail_table
 from app.guard import CANARY, OUTPUT_REPLIES
+from app.metrics import LlmMetrics
 from app.store import save_detail, upsert_companies, upsert_financials
 
 
@@ -53,11 +55,11 @@ def _llm(text: str):
     return RunnableLambda(fake), seen
 
 
-def _get(detail_id: str, llm):
+def _get(detail_id: str, llm, token: str = "Bearer t"):
     main.app.dependency_overrides[main.get_llm] = lambda: llm
     try:
         return TestClient(main.app).get(
-            f"/internal/details/{detail_id}", headers={"Authorization": "Bearer t"}
+            f"/internal/details/{detail_id}", headers={"Authorization": token}
         )
     finally:
         main.app.dependency_overrides.clear()
@@ -130,3 +132,15 @@ def test_재무_데이터가_없으면_안내만_주고_LLM을_부르지_않는�
 
     assert res.json()["data"] == {"report": NO_DATA_REPORT}
     assert seen == []
+
+
+def test_보고서_호출도_요청한_회원의_ID로_남는다(seeded):
+    users = []
+    llm = FakeListChatModel(
+        responses=["삼성전자의 2026년 1분기 영업이익은 66,853억원(+1.2%)입니다."],
+        callbacks=[LlmMetrics(lambda *args: users.append(args[0]))],
+    )
+
+    _get("dt_ok", llm, "Bearer h.eyJzdWIiOiI3In0.s")  # sub가 "7"인 JWT 모양
+
+    assert users == [7]
