@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS ai_usage (
     model          TEXT         NOT NULL,
     input_tokens   INTEGER      NOT NULL,
     output_tokens  INTEGER      NOT NULL,  -- 추론 토큰은 출력에 든다
-    fallback       BOOLEAN      NOT NULL DEFAULT FALSE  -- 장애 대체 호출(NFR-056이 채운다)
+    fallback       BOOLEAN      NOT NULL DEFAULT FALSE  -- 장애 대체(Claude)로 답한 호출(NFR-056)
 );
 
 -- 상세 보기(FR-016): 답변마다 발급한 detailId와 분석 조건. 보고서는 클릭할 때 이 조건으로 만든다.
@@ -226,14 +226,20 @@ def write_chat_log(
     )
 
 
-# LLM 호출 한 번의 사용량을 남긴다.
+# LLM 호출 한 번의 사용량을 남긴다. fallback은 장애 대체(NFR-056)로 답한 호출이다.
 def write_ai_usage(
-    conn: psycopg.Connection, user_id: int, model: str, input_tokens: int, output_tokens: int
+    conn: psycopg.Connection,
+    user_id: int,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    fallback: bool = False,
 ) -> None:
     _execute_ensuring_schema(
         conn,
-        "INSERT INTO ai_usage (user_id, model, input_tokens, output_tokens) VALUES (%s, %s, %s, %s)",
-        (user_id, model, input_tokens, output_tokens),
+        "INSERT INTO ai_usage (user_id, model, input_tokens, output_tokens, fallback) "
+        "VALUES (%s, %s, %s, %s, %s)",
+        (user_id, model, input_tokens, output_tokens, fallback),
     )
 
 

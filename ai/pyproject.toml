@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi",
     "httpx>=0.28.1",
+    "langchain-anthropic>=1.7.6",
     "langchain-openai>=1.7.2",
     "langgraph>=1.2.15",
     "prometheus-client>=0.26.0",

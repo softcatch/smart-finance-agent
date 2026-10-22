@@ -334,6 +334,14 @@ def test_AI_사용량을_호출마다_한_줄씩_남긴다(conn):
     assert rows == [(7, "gpt-5-nano", 1529, 550, False), (7, "gpt-5-nano", 300, 40, False)]
 
 
+def test_대체_호출은_대체_여부가_참으로_남는다(conn):
+    write_ai_usage(conn, 7, "claude-haiku-5-5", 120, 30, fallback=True)
+
+    assert conn.execute("SELECT model, fallback FROM ai_usage").fetchall() == [
+        ("claude-haiku-5-5", True)
+    ]
+
+
 def test_사용량_테이블이_아직_없어도_만들어서_남긴다(conn):
     conn.execute("DROP TABLE ai_usage")
     conn.commit()

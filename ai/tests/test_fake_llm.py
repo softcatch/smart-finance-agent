@@ -2,9 +2,12 @@ import base64
 import json
 import math
 import struct
+import time
 
 import pytest
 from fastapi.testclient import TestClient
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.business import embed_texts
 from app.financial import build_detail_table, write_report
@@ -17,6 +20,7 @@ from loadtest.fake_llm import (
     KINDS,
     LATENCY,
     Delays,
+    Faults,
     create_app,
     embedding_vector,
     extract_slots,
@@ -232,3 +236,120 @@ def test_상세_보고서와_임베딩도_가짜_LLM으로_돈다(fake_llm_url):
 
     assert report == ANSWERS["report"]
     assert len(vectors) == 1 and len(vectors[0]) == EMBEDDING_DIM
+
+
+# --- 장애 대체(NFR-056): Anthropic 경로와 장애 주입 ---
+def _claude(system: str, user: str = "안녕", **extra) -> dict:
+    return {
+        "model": "claude-haiku-5-5",
+        "max_tokens": 100,
+        "system": system,
+        "messages": [{"role": "user", "content": user}],
+        **extra,
+    }
+
+
+def test_Anthropic_경로도_호출_종류를_요청_모양으로_가른다(monkeypatch):
+    kinds = []
+    monkeypatch.setattr(Delays, "next", lambda self, kind: kinds.append(kind) or 0)
+    client = TestClient(create_app(ONE_MS))
+    tool = {"tools": [{"name": "TransferSlots", "input_schema": {}}]}
+
+    texts = [
+        client.post("/v1/messages", json=_claude(system)).json()["content"][0]["text"]
+        for system in (
+            "너는 비서다",
+            "아래 <공시> 블록만 근거로 답한다",
+            "아래 <표>는 코드가 계산했다",
+        )
+    ]
+    client.post("/v1/messages", json=_claude("의도를 뽑는다", **tool))
+
+    assert kinds == ["answer", "business", "report", "extract"]
+    assert texts == [ANSWERS["answer"], ANSWERS["business"], ANSWERS["report"]]
+
+
+def test_Anthropic_구조화_출력은_강제_도구_호출로_돌려준다():
+    client = TestClient(create_app(ONE_MS))
+    tools = [{"name": "TransferSlots", "input_schema": {}}]
+
+    res = client.post(
+        "/v1/messages", json=_claude("추출", "삼성전자 영업이익 알려줘", tools=tools)
+    ).json()
+
+    assert res["stop_reason"] == "tool_use"
+    (block,) = res["content"]
+    assert (block["type"], block["name"]) == ("tool_use", "TransferSlots")
+    slots = TransferSlots.model_validate(block["input"])
+    assert slots.is_financial and slots.companies == ["삼성전자"]
+
+
+def test_실제_ChatAnthropic_클라이언트가_가짜_서버에서_답변과_구조화_출력을_받는다():
+    url, stop = serve(create_app(ONE_MS))
+    try:
+        claude = ChatAnthropic(
+            model="claude-haiku-5-5",
+            api_key="fake",
+            base_url=url.removesuffix("/v1"),
+            max_retries=0,
+        )
+        plain = claude.invoke([SystemMessage("너는 비서다"), HumanMessage("안녕")])
+        slots = claude.with_structured_output(TransferSlots).invoke(
+            [SystemMessage("추출"), HumanMessage("삼성전자 영업이익 알려줘")]
+        )
+    finally:
+        stop()
+
+    assert plain.content == ANSWERS["answer"]
+    assert slots.is_financial and slots.companies == ["삼성전자"]
+
+
+def _statuses(app, route: str, body: dict, n: int = 40) -> list[int]:
+    client = TestClient(app)
+    return [client.post(route, json=body).status_code for _ in range(n)]
+
+
+OPENAI_BODY = {"messages": [{"role": "user", "content": "안녕"}]}
+
+
+def test_오류_주입은_비율과_상태_코드대로_하고_시드가_같으면_같은_순서다():
+    faults = Faults(error_rate=0.5, status=429)
+
+    first = _statuses(create_app(ONE_MS, 1, openai=faults), "/v1/chat/completions", OPENAI_BODY)
+    again = _statuses(create_app(ONE_MS, 1, openai=faults), "/v1/chat/completions", OPENAI_BODY)
+    other = _statuses(create_app(ONE_MS, 2, openai=faults), "/v1/chat/completions", OPENAI_BODY)
+
+    assert set(first) == {200, 429}
+    assert first == again
+    assert first != other
+
+
+def test_장애는_경로마다_따로_주입되고_난수열도_따로다():
+    faults = Faults(error_rate=0.5, status=503)
+    alone = _statuses(create_app(ONE_MS, 1, openai=faults), "/v1/chat/completions", OPENAI_BODY)
+    app = create_app(ONE_MS, 1, openai=faults)  # Anthropic에는 장애가 없다
+
+    claude = _statuses(app, "/v1/messages", _claude("너는 비서다"), n=10)
+    mixed = _statuses(app, "/v1/chat/completions", OPENAI_BODY)
+
+    assert claude == [200] * 10
+    assert mixed == alone  # 다른 경로 호출이 사이에 있어도 이 경로의 순서는 같다
+
+
+def test_Anthropic_오류_주입은_Anthropic_오류_본문으로_답한다():
+    client = TestClient(create_app(ONE_MS, anthropic=Faults(error_rate=1.0, status=529)))
+
+    res = client.post("/v1/messages", json=_claude("너는 비서다"))
+
+    assert res.status_code == 529
+    assert res.json()["type"] == "error"
+
+
+def test_멈춤_주입은_정해진_시간_뒤에_정상으로_답한다():
+    client = TestClient(create_app(ONE_MS, openai=Faults(hang_rate=1.0, hang_s=0.3)))
+
+    start = time.perf_counter()
+    res = client.post("/v1/chat/completions", json=OPENAI_BODY)
+
+    assert res.status_code == 200
+    assert time.perf_counter() - start >= 0.3

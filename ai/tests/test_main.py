@@ -129,16 +129,18 @@ def test_모델은_사용량_기록_함수가_연결된_핸들러를_쓴다():
     (handler,) = FakeOpenAI.kwargs["callbacks"]
 
     assert handler.record is main.record_usage
+    assert handler.fallback is False
 
 
 def test_사용량은_연결만_바꿔_실제_DB에_남는다(conn, database_url, monkeypatch):
     monkeypatch.setattr(main, "_connect", lambda: psycopg.connect(database_url))
 
     main.record_usage(7, "gpt-5-nano", 1529, 550)
+    main.record_usage(7, "claude-haiku-5-5", 300, 40, fallback=True)
 
     assert conn.execute(
-        "SELECT user_id, model, input_tokens, output_tokens FROM ai_usage"
-    ).fetchall() == [(7, "gpt-5-nano", 1529, 550)]
+        "SELECT user_id, model, input_tokens, output_tokens, fallback FROM ai_usage ORDER BY id"
+    ).fetchall() == [(7, "gpt-5-nano", 1529, 550, False), (7, "claude-haiku-5-5", 300, 40, True)]
 
 
 def test_사용량을_못_써도_예외가_나가지_않는다(monkeypatch):

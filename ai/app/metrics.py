@@ -44,12 +44,14 @@ def update_threadpool() -> None:
 class LlmMetrics(BaseCallbackHandler):
     """채팅 모델 호출마다 시간·토큰·오류를 센다. 구조화 출력·답변·보고서가 모두 지나간다.
 
-    호출 설정의 metadata에 user_id가 있으면 record(회원 ID, 모델, 입력 토큰, 출력 토큰)로 사용량도 남긴다
-    (NFR-054). 성공한 호출만 남기고, 사용자가 없거나 record가 없으면 지표만 센다.
+    호출 설정의 metadata에 user_id가 있으면 record(회원 ID, 모델, 입력·출력 토큰, 대체 여부)로 사용량도
+    남긴다(NFR-054). 성공한 호출만 남기고, 사용자가 없거나 record가 없으면 지표만 센다.
+    fallback은 장애 대체(NFR-056)용 모델에 붙인 핸들러다 — 그 호출은 대체 여부가 참으로 남는다.
     """
 
-    def __init__(self, record=None) -> None:
+    def __init__(self, record=None, fallback: bool = False) -> None:
         self.record = record
+        self.fallback = fallback
         # 호출 → (시작 시각, 모델, 회원 ID)
         self.started: dict[UUID, tuple[float, str, int | None]] = {}
 
@@ -75,10 +77,13 @@ class LlmMetrics(BaseCallbackHandler):
         LLM_TOKENS.labels("output", model).inc(output_tokens)
         self._observe(run_id, "ok")
         if self.record and user_id is not None:  # 기록이 실패해도 위 지표는 이미 셌다
-            self.record(user_id, model, input_tokens, output_tokens)
+            self.record(user_id, model, input_tokens, output_tokens, self.fallback)
 
     def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs) -> None:
-        OPENAI_ERRORS.labels(type(error).__name__).inc()
+        if (
+            not self.fallback
+        ):  # openai_errors_total은 OpenAI 오류만 센다(Claude의 같은 이름 오류와 섞이지 않게)
+            OPENAI_ERRORS.labels(type(error).__name__).inc()
         self._observe(run_id, "error")
 
     def _observe(self, run_id: UUID, outcome: str) -> None:

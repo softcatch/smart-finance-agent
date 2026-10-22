@@ -1,5 +1,7 @@
 from datetime import date
 
+import httpx
+import openai
 import psycopg
 from fastapi.testclient import TestClient
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
@@ -8,7 +10,7 @@ from langchain_core.runnables import RunnableLambda
 
 from app.business import ASK_BUSINESS_COMPANY
 from app.financial import ASK_COMPANY
-from app.graph import INJECTION_REPLY, OUTPUT_REPLIES, SYSTEM_PROMPT, build_graph
+from app.graph import INJECTION_REPLY, OUTPUT_REPLIES, SEARCH_DOWN_REPLY, SYSTEM_PROMPT, build_graph
 from app.guard import CANARY
 from app.history import ASK_PERIOD
 from app.main import app, get_graph
@@ -1044,6 +1046,32 @@ def test_답변_숫자가_공시_본문에_있으면_통과한다():
     assert out["query"] is None  # 통과하면 재검색하지 않는다
 
 
+def test_사업의_내용_답변만_business_llm이_받고_재작성과_일반_답변은_llm이_받는다():
+    llm, llm_seen = _says("수주잔고 현황", "안녕하세요")
+    business_llm, business_seen = _says(
+        "수주잔고는 1,500억원입니다.", "수주잔고는 1,000억원입니다."
+    )
+    graph = build_graph(
+        llm,
+        _extractor(
+            TransferSlots(is_transfer=False, is_business=True, companies=["삼성전자"]),
+            TransferSlots(is_transfer=False),
+        ),
+        business_llm=business_llm,
+    )
+
+    first = graph.invoke(
+        {"message": "삼성전자 수주잔고"},
+        _cfg("th_1", search_business=_chunks_with("수주잔고 1,000억원")),
+    )
+    second = graph.invoke({"message": "안녕"}, _cfg("th_1"))
+
+    assert first["guard"] == "PASS"  # 답변 → 재작성(llm) → 재답변
+    assert all("<공시>" in call[0] for call in business_seen) and len(business_seen) == 2
+    assert len(llm_seen) == 2 and "<공시>" not in llm_seen[0][0]  # 재작성, 일반 답변
+    assert second["reply"] == "안녕하세요"
+
+
 def test_재검색해도_숫자가_근거에_없으면_고정_문장과_출처만_나가고_기록에_안_남는다():
     llm, seen = _says(
         "수주잔고는 1,500억원입니다.", "수주잔고 현황", "수주잔고는 1,500억원입니다.", "네"
@@ -1127,6 +1155,41 @@ def test_재검색에서_DB를_못_읽으면_안내가_그대로_나간다():
 
     assert out["guard"] == "PASS"  # 첫 답변의 미확인 숫자가 안내 문장에 붙지 않는다
     assert out["reply"] == "사업의 내용을 지금 읽을 수 없습니다. 잠시 후 다시 시도해 주세요."
+
+
+def _embedding_down(*args):
+    raise openai.APIConnectionError(request=httpx.Request("POST", "http://openai/v1/embeddings"))
+
+
+def test_OpenAI_임베딩이_실패하면_검색할_수_없다고_안내하고_답변_LLM을_부르지_않는다():
+    llm, seen = _spy()
+
+    out = build_graph(llm, _business("삼성전자")).invoke(
+        {"message": "삼성전자 사업 내용"}, _cfg("th_1", search_business=_embedding_down)
+    )
+
+    assert out["reply"] == SEARCH_DOWN_REPLY
+    assert out["guard"] == "PASS"
+    assert "출처" not in out["reply"]
+    assert seen == []  # 대체(Claude)가 있어도 임베딩은 못 바꿔서 검색 없이 답하지 않는다
+
+
+def test_재검색에서_OpenAI_임베딩이_실패해도_안내가_그대로_나간다():
+    llm, _ = _says("수주잔고는 1,500억원입니다.", "수주잔고 현황")
+    calls = []
+
+    def search(names, question):
+        calls.append(question)
+        if len(calls) == 2:
+            _embedding_down()
+        return [("005930", "삼성전자")], [], {"005930": [_chunk("수주잔고 1,000억원")]}
+
+    out = build_graph(llm, _business("삼성전자")).invoke(
+        {"message": "삼성전자 수주잔고"}, _cfg("th_1", search_business=search)
+    )
+
+    assert out["reply"] == SEARCH_DOWN_REPLY  # 첫 답변의 미확인 숫자 문장이 아니라 안내가 나간다
+    assert out["guard"] == "PASS"
 
 
 def test_질문에만_있는_숫자는_근거가_아니다():
