@@ -1473,3 +1473,21 @@ def test_막힌_문장의_계좌번호는_대응표에_남지_않는다():
 
     assert out["guard"] == "INJECTION"
     assert not out.get("pseudonyms")
+
+
+def test_LLM이_자리표시자를_꾸며_돌려줘도_원래_번호로_되돌린다():
+    extractor, _ = _spying_extractor(
+        TransferSlots(is_transfer=True, amount=10000, recipient_account_number="계좌 [계좌1]")
+    )
+    created = []
+
+    def create(pending):
+        created.append(pending)
+        return CARD
+
+    out = build_graph(_spy()[0], extractor).invoke(
+        {"message": "계좌 123456789012으로 1만원 송금"}, _cfg("th_1", create_transfer=create)
+    )
+
+    assert out["reply"] == CARD_REPLY
+    assert created == [{"amount": 10000, "recipient_account_number": "123456789012"}]

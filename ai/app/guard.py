@@ -30,6 +30,7 @@ def mask_pii(text: str) -> str:
 # [계좌1]처럼 바꿔 보내고, 송금 요청을 만들기 직전에 코드가 되돌린다. 대응표(자리표시자 → 번호)는 대화 상태에만 둔다.
 _ACCOUNT = re.compile(r"(?<!\d)\d{12}(?!\d)")
 _ACCOUNT_MARK = re.compile(r"\[계좌\d+\]")
+_ACCOUNT_MARK_LOOSE = re.compile(r"\[?계좌\s*(\d{1,3})\]?(?!\d)")
 
 
 # 계좌번호를 [계좌N]으로 바꾼다. 같은 번호는 같은 표기를 쓰고, 새 번호는 다음 번호를 받는다. → (바꾼 글, 대응표)
@@ -45,6 +46,12 @@ def pseudonymize(text: str, table: dict[str, str]) -> tuple[str, dict[str, str]]
         return marks[number]
 
     return _ACCOUNT.sub(mark_of, text), table
+
+
+# LLM이 자리표시자를 꾸며 돌려줘도('계좌 [계좌1]'·'계좌1') [계좌N] 하나로 맞춘다. 표기가 없으면 그대로다.
+def normalize_mark(value: str | None) -> str | None:
+    match = _ACCOUNT_MARK_LOOSE.search(value) if value else None
+    return f"[계좌{match[1]}]" if match else value
 
 
 # 대응표에 없는 [계좌N] 표기인가 — LLM이 지어낸 것이라 계좌번호로 쓸 수 없다.

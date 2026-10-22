@@ -17,6 +17,7 @@ from app.guard import (
     is_injection,
     is_unknown_mark,
     mask_pii,
+    normalize_mark,
     pseudonymize,
     restore,
     unverified_numbers,
@@ -124,6 +125,7 @@ def build_graph(llm: Runnable, extractor=None, business_llm: Runnable | None = N
         pending = state.get("pending") or {}
         prompt = EXTRACT_PROMPT.format(pending=json.dumps(pending, ensure_ascii=False))
         slots = extractor.invoke([SystemMessage(prompt), state["messages"][-1]])
+        slots.recipient_account_number = normalize_mark(slots.recipient_account_number)
         # LLM이 지어낸 [계좌N](대응표에 없는 표기)은 계좌번호가 아니다 — 비우면 수취인을 다시 묻는다
         if is_unknown_mark(slots.recipient_account_number, state.get("pseudonyms") or {}):
             slots.recipient_account_number = None

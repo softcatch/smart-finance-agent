@@ -6,6 +6,7 @@ from app.guard import (
     is_injection,
     is_unknown_mark,
     mask_pii,
+    normalize_mark,
     pseudonymize,
     restore,
     unverified_numbers,
@@ -264,3 +265,21 @@ def test_대응표에_없는_자리표시자는_지어낸_것이다():
     assert not is_unknown_mark("[계좌1]", table)
     assert not is_unknown_mark("123456789012", table)  # 번호 자체는 자리표시자가 아니다
     assert not is_unknown_mark(None, table)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("[계좌1]", "[계좌1]"),
+        ("계좌 [계좌1]", "[계좌1]"),  # 앞말을 붙여 돌려줘도
+        ("계좌1", "[계좌1]"),  # 대괄호를 빼도
+        ("[계좌12]로", "[계좌12]"),
+        ("123456789012", "123456789012"),  # 번호·별칭·없음은 그대로다
+        ("계좌 123456789012", "계좌 123456789012"),
+        ("계좌번호", "계좌번호"),
+        ("엄마", "엄마"),
+        (None, None),
+    ],
+)
+def test_LLM이_꾸며_돌려준_자리표시자를_하나의_표기로_맞춘다(value, expected):
+    assert normalize_mark(value) == expected
