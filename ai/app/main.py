@@ -143,10 +143,12 @@ def log_chat(thread_id: str, guard: str, node_ms: dict[str, int]) -> None:
 
 
 # LLM 호출 한 번의 사용량을 남긴다(NFR-054). 호출이 끝날 때 바로 쓰고, 실패해도 채팅은 무관하다.
-def record_usage(user_id: int, model: str, input_tokens: int, output_tokens: int) -> None:
+def record_usage(
+    user_id: int, model: str, input_tokens: int, output_tokens: int, fallback: bool = False
+) -> None:
     try:
         with _connect() as conn:
-            write_ai_usage(conn, user_id, model, input_tokens, output_tokens)
+            write_ai_usage(conn, user_id, model, input_tokens, output_tokens, fallback)
     except psycopg.Error:
         pass
 

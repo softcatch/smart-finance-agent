@@ -142,7 +142,37 @@ def test_사용자가_있는_호출은_모델과_토큰을_기록한다():
     llm.invoke("질문", config={"metadata": {"user_id": 7}})
     llm.invoke("질문", config={"metadata": {"user_id": 8}})
 
-    assert calls == [(7, "gpt-5-nano", 120, 30), (8, "gpt-5-nano", 120, 30)]
+    assert calls == [(7, "gpt-5-nano", 120, 30, False), (8, "gpt-5-nano", 120, 30, False)]
+
+
+def test_대체용_모델의_호출은_대체_여부가_참으로_남는다():
+    calls = []
+    llm = _Usage(
+        model_name="claude-haiku-5-5",
+        callbacks=[LlmMetrics(lambda *args: calls.append(args), fallback=True)],
+    )
+
+    llm.invoke("질문", config={"metadata": {"user_id": 7}})
+
+    assert calls == [(7, "claude-haiku-5-5", 120, 30, True)]
+
+
+def test_대체용_모델의_오류는_OpenAI_오류_지표에_섞이지_않는다():
+    class Boom(_Usage):
+        def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+            request = httpx.Request("POST", "http://anthropic")
+            raise openai.RateLimitError(
+                "한도", response=httpx.Response(429, request=request), body=None
+            )
+
+    errors = _value("openai_errors_total", type="RateLimitError")
+    failed = _value("llm_call_seconds_count", outcome="error")
+
+    with pytest.raises(openai.RateLimitError):
+        Boom(callbacks=[LlmMetrics(fallback=True)]).invoke("질문")
+
+    assert _value("openai_errors_total", type="RateLimitError") == errors  # 센 것은 호출 시간뿐이다
+    assert _value("llm_call_seconds_count", outcome="error") == failed + 1
 
 
 def test_사용자가_없는_호출은_기록하지_않고_지표만_센다():
