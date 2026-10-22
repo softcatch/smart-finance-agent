@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable, RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
+from openai import OpenAIError
 
 from app.business import ASK_BUSINESS_COMPANY, answer_business, rewrite_query, source_lines
 from app.financial import ASK_COMPANY, MAX_COMPANIES, build_table, find_competitors
@@ -41,6 +42,7 @@ EXTRACT_PROMPT = (
     "말하지 않은 값은 null로 둔다. "
     "금액은 원 단위 정수, 별칭은 들은 그대로 쓴다.\n진행 중인 송금: {pending}"
 )
+SEARCH_DOWN_REPLY = "지금 공시 본문을 검색할 수 없습니다. 잠시 후 다시 시도해 주세요."
 NOT_FOUND_REPLY = "계좌나 별칭을 찾을 수 없습니다. 받는 분의 계좌번호나 별칭을 다시 알려 주세요."
 
 
@@ -239,6 +241,10 @@ def build_graph(llm: Runnable, extractor=None, business_llm: Runnable | None = N
             }
         except psycopg.OperationalError:  # DB를 못 읽어도 채팅은 이어진다
             return {"reply": "사업의 내용을 지금 읽을 수 없습니다. 잠시 후 다시 시도해 주세요."}
+        except (
+            OpenAIError
+        ):  # 임베딩은 Claude로 대체하지 않는다(NFR-056) — OpenAI 장애면 검색할 수 없다
+            return {"reply": SEARCH_DOWN_REPLY}
         found = [(stock, name) for stock, name in companies if chunks.get(stock)]
         empty = [name for stock, name in companies if not chunks.get(stock)]
         if not found:
