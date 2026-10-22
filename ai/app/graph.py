@@ -1,9 +1,8 @@
 import json
 
 import psycopg
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables import Runnable, RunnableConfig
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 
@@ -78,11 +77,13 @@ class ChatState(MessagesState, total=False):
 # | 사업의 내용 답변. LLM이 쓴 답변(일반·사업의 내용)은 출력 가드를 거쳐 나간다.
 # 사업의 내용 답변에 근거 없는 숫자가 있으면 검색어를 고쳐 한 번 더 검색·답변한다(턴마다 1회, NFR-052).
 # LLM·추출기를 인자로 받아 테스트에서 가짜를 넣는다. 추출기를 안 주면 llm의 구조화 출력을 쓴다.
+# 사업의 내용 답변은 호출 종류별 타임아웃이 달라(NFR-056) business_llm으로 따로 받는다. 없으면 llm을 쓴다.
 # 대화 기록은 체크포인터가 thread_id별로 들고 있다 — invoke할 때 config에 thread_id를 넘긴다.
 # Spring 호출 함수는 config["configurable"]의 create_transfer·get_history로 받는다(JWT를 쥔 함수).
 # 재무 조회 함수는 compare_financials, 사업의 내용 검색 함수는 search_business로 받는다(DB를 읽는 함수).
-def build_graph(llm: BaseChatModel, extractor=None):
+def build_graph(llm: Runnable, extractor=None, business_llm: Runnable | None = None):
     extractor = extractor or llm.with_structured_output(TransferSlots)
+    business_llm = business_llm or llm
 
     def input_guard(state: ChatState) -> ChatState:
         message = mask_pii(state["message"])
@@ -247,7 +248,7 @@ def build_graph(llm: BaseChatModel, extractor=None):
                 "reply": f"수집 대상에서 찾지 못한 기업입니다: {', '.join(missing)}. "
                 "정식 기업명으로 다시 말씀해 주세요."
             }
-        reply, evidence = answer_business(llm, state["messages"], found, chunks)
+        reply, evidence = answer_business(business_llm, state["messages"], found, chunks)
         footer = source_lines(found, chunks)
         if skipped := [*missing, *empty]:
             footer += f"\n답변하지 못한 기업: {', '.join(skipped)}"

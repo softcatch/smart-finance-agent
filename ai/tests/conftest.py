@@ -37,3 +37,9 @@ def no_dev_db(monkeypatch):
         raise psycopg.OperationalError("테스트는 개발 DB에 연결하지 않는다")
 
     monkeypatch.setattr("app.main._connect", refuse)
+
+
+# 개발자 환경에 Anthropic 키가 있어도 테스트가 진짜 Claude를 대체로 붙이지 않게 막는다. 대체를 보는 테스트는 이 값을 다시 바꾼다.
+@pytest.fixture(autouse=True)
+def no_anthropic_key(monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)

@@ -34,6 +34,8 @@ services:
     environment:
       OPENAI_API_KEY: fake
       OPENAI_BASE_URL: http://fake-llm:9000/v1
+      # 측정은 장애 대체(Claude) 없이 한다 — .env에 키가 있어도 진짜 Anthropic을 부르지 않는다(NFR-056)
+      ANTHROPIC_API_KEY: ""
     depends_on:
       fake-llm:
         condition: service_healthy

@@ -1044,6 +1044,32 @@ def test_답변_숫자가_공시_본문에_있으면_통과한다():
     assert out["query"] is None  # 통과하면 재검색하지 않는다
 
 
+def test_사업의_내용_답변만_business_llm이_받고_재작성과_일반_답변은_llm이_받는다():
+    llm, llm_seen = _says("수주잔고 현황", "안녕하세요")
+    business_llm, business_seen = _says(
+        "수주잔고는 1,500억원입니다.", "수주잔고는 1,000억원입니다."
+    )
+    graph = build_graph(
+        llm,
+        _extractor(
+            TransferSlots(is_transfer=False, is_business=True, companies=["삼성전자"]),
+            TransferSlots(is_transfer=False),
+        ),
+        business_llm=business_llm,
+    )
+
+    first = graph.invoke(
+        {"message": "삼성전자 수주잔고"},
+        _cfg("th_1", search_business=_chunks_with("수주잔고 1,000억원")),
+    )
+    second = graph.invoke({"message": "안녕"}, _cfg("th_1"))
+
+    assert first["guard"] == "PASS"  # 답변 → 재작성(llm) → 재답변
+    assert all("<공시>" in call[0] for call in business_seen) and len(business_seen) == 2
+    assert len(llm_seen) == 2 and "<공시>" not in llm_seen[0][0]  # 재작성, 일반 답변
+    assert second["reply"] == "안녕하세요"
+
+
 def test_재검색해도_숫자가_근거에_없으면_고정_문장과_출처만_나가고_기록에_안_남는다():
     llm, seen = _says(
         "수주잔고는 1,500억원입니다.", "수주잔고 현황", "수주잔고는 1,500억원입니다.", "네"
