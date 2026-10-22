@@ -37,6 +37,7 @@ from app.store import (
     load_financials,
     save_detail,
     search_business_chunks,
+    write_ai_usage,
     write_chat_log,
 )
 
@@ -85,7 +86,7 @@ def make_llm() -> ChatOpenAI:
     return ChatOpenAI(
         model=os.getenv("OPENAI_MODEL") or "gpt-5-nano",
         max_retries=0,
-        callbacks=[LlmMetrics()],
+        callbacks=[LlmMetrics(record_usage)],
         **options,
     )
 
@@ -137,6 +138,15 @@ def log_chat(thread_id: str, guard: str, node_ms: dict[str, int]) -> None:
     try:
         with _connect() as conn:
             write_chat_log(conn, thread_id, guard, node_ms)
+    except psycopg.Error:
+        pass
+
+
+# LLM 호출 한 번의 사용량을 남긴다(NFR-054). 호출이 끝날 때 바로 쓰고, 실패해도 채팅은 무관하다.
+def record_usage(user_id: int, model: str, input_tokens: int, output_tokens: int) -> None:
+    try:
+        with _connect() as conn:
+            write_ai_usage(conn, user_id, model, input_tokens, output_tokens)
     except psycopg.Error:
         pass
 

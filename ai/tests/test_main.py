@@ -123,6 +123,33 @@ def test_로그를_못_써도_예외가_나가지_않는다(monkeypatch):
     real_log_chat("th_1", "PASS", {})  # 채팅은 로그 때문에 실패하지 않는다
 
 
+def test_모델은_사용량_기록_함수가_연결된_핸들러를_쓴다():
+    main.get_llm()
+
+    (handler,) = FakeOpenAI.kwargs["callbacks"]
+
+    assert handler.record is main.record_usage
+
+
+def test_사용량은_연결만_바꿔_실제_DB에_남는다(conn, database_url, monkeypatch):
+    monkeypatch.setattr(main, "_connect", lambda: psycopg.connect(database_url))
+
+    main.record_usage(7, "gpt-5-nano", 1529, 550)
+
+    assert conn.execute(
+        "SELECT user_id, model, input_tokens, output_tokens FROM ai_usage"
+    ).fetchall() == [(7, "gpt-5-nano", 1529, 550)]
+
+
+def test_사용량을_못_써도_예외가_나가지_않는다(monkeypatch):
+    def down():
+        raise psycopg.OperationalError("connection refused")
+
+    monkeypatch.setattr(main, "_connect", down)
+
+    main.record_usage(7, "gpt-5-nano", 10, 5)  # 채팅은 사용량 기록 때문에 실패하지 않는다
+
+
 def _bearer(claims: dict) -> str:
     # Spring이 보내는 JWT 모양(헤더.payload.서명, 패딩 없는 base64url). 서명은 FastAPI가 보지 않는다.
     payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
