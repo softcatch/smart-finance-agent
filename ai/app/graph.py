@@ -12,6 +12,7 @@ from app.financial import ASK_COMPANY, MAX_COMPANIES, build_table, find_competit
 from app.guard import (
     CANARY,
     INJECTION_REPLY,
+    NAME_MARK,
     OUTPUT_REPLIES,
     check_output,
     is_injection,
@@ -171,24 +172,29 @@ def build_graph(llm: Runnable, extractor=None, business_llm: Runnable | None = N
                 "messages": [AIMessage(NOT_FOUND_REPLY)],
                 "reply": NOT_FOUND_REPLY,
             }
-        # 금액·이름은 LLM이 아니라 Spring 응답 값으로 쓴다(NFR-002)
-        reply = f"{card['recipientName']}님께 {card['amount']:,}원을 보낼까요? 아래 확인 카드에서 [보내기]를 눌러 주세요."
+
+        # 금액·이름은 LLM이 아니라 Spring 응답 값으로 쓴다(NFR-002). 화면에는 실명, 대화 기록에는 NAME_MARK(NFR-055)
+        def confirm(name: str) -> str:
+            return f"{name}님께 {card['amount']:,}원을 보낼까요? 아래 확인 카드에서 [보내기]를 눌러 주세요."
+
         return {
             "pending": {},
             "transfer_card": card,
-            "messages": [AIMessage(reply)],
-            "reply": reply,
+            "messages": [AIMessage(confirm(NAME_MARK))],
+            "reply": confirm(card["recipientName"]),
         }
 
     def history(state: ChatState, config: RunnableConfig) -> ChatState:
         period = state.get("period")
         if period is None:  # 지원하지 않는 기간이면 조회하지 않고 가능한 기간을 안내한다
-            reply = ASK_PERIOD
+            reply = record = ASK_PERIOD
         else:
             start, end = period_range(period, today_kst())
             summary = config["configurable"]["get_history"](start, end)
-            reply = history_reply(period, start, end, summary)  # 숫자는 Spring 응답 값(NFR-002)
-        return {"messages": [AIMessage(reply)], "reply": reply}
+            # 숫자는 Spring 응답 값(NFR-002). 화면에는 상대방 실명, 대화 기록에는 NAME_MARK(NFR-055)
+            reply = history_reply(period, start, end, summary)
+            record = history_reply(period, start, end, summary, hide_names=True)
+        return {"messages": [AIMessage(record)], "reply": reply}
 
     # 재무 비교: 기업을 찾고(조회 함수) 표는 코드가 만든다. 숫자는 LLM이 만들지 않는다(NFR-002).
     # 질문에 "경쟁"이 있고 기업을 하나만 말했으면 그 업종의 경쟁사를 더한다(FR-019).

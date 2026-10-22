@@ -1491,3 +1491,40 @@ def test_LLM이_자리표시자를_꾸며_돌려줘도_원래_번호로_되돌�
 
     assert out["reply"] == CARD_REPLY
     assert created == [{"amount": 10000, "recipient_account_number": "123456789012"}]
+
+
+def test_확인_문장의_실명은_화면에만_있고_대화_기록에는_자리표시자로_남는다():
+    llm, seen = _spy()
+    graph = build_graph(
+        llm,
+        _extractor(TransferSlots(is_transfer=True, amount=10000, alias="엄마")),
+    )
+    config = _cfg("th_1", create_transfer=lambda pending: CARD)
+
+    out = graph.invoke({"message": "엄마한테 1만원 보내줘"}, config)
+    graph.invoke({"message": "고마워"}, config)  # 다음 턴의 LLM 호출
+
+    assert out["reply"] == CARD_REPLY  # 화면에는 실명
+    assert out["messages"][-1].content == CARD_REPLY.replace("김영희", "[이름]")
+    assert out["transfer_card"]["recipientName"] == "김영희"
+    assert any("[이름]님께 10,000원을" in text for text in seen[0])
+    assert not any("김영희" in text for call in seen for text in call)  # LLM에는 실명이 가지 않는다
+
+
+def test_내역_답변의_상대방_실명은_화면에만_있고_대화_기록에는_자리표시자로_남는다(monkeypatch):
+    monkeypatch.setattr("app.graph.today_kst", lambda: date(2026, 10, 15))
+    llm, seen = _spy()
+    graph = build_graph(
+        llm, _extractor(TransferSlots(is_transfer=False, is_history=True, period="this_month"))
+    )
+    config = _cfg("th_1", get_history=lambda start, end: SUMMARY)
+
+    out = graph.invoke({"message": "이번 달 얼마 보냈어?"}, config)
+    graph.invoke({"message": "고마워"}, config)
+
+    assert (
+        "이철수에게 120,000원 보냄" in out["reply"] and "김영희에게서 50,000원 받음" in out["reply"]
+    )
+    assert "[이름]에게 120,000원 보냄" in out["messages"][-1].content
+    assert not any(name in text for call in seen for text in call for name in ("이철수", "김영희"))
+    assert any("[이름]에게" in text for text in seen[0])  # 기록은 자리표시자로 간다

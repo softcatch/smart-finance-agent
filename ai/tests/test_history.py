@@ -70,6 +70,19 @@ def test_답변의_숫자는_Spring_응답_값이고_시각은_한국_시간():
     ]
 
 
+def test_대화_기록용_문장은_상대방_실명을_자리표시자로_바꾼다():
+    reply = history_reply(
+        "this_month", date(2026, 10, 1), date(2026, 10, 15), SUMMARY, hide_names=True
+    )
+
+    assert reply.splitlines()[2:4] == [
+        "- 10/15 [이름]에게서 50,000원 받음",
+        "- 10/3 [이름]에게 70,000원 보냄",
+    ]
+    assert "김영희" not in reply and "이철수" not in reply
+    assert "보낸 금액은 120,000원" in reply  # 숫자는 그대로다
+
+
 def test_하루_조회는_날짜를_한_번만_쓴다():
     reply = history_reply("today", date(2026, 10, 15), date(2026, 10, 15), SUMMARY)
 
