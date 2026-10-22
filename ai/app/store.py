@@ -50,6 +50,18 @@ CREATE TABLE IF NOT EXISTS chat_log (
     node_ms     JSONB        NOT NULL  -- 노드 이름 → 걸린 시간(ms)
 );
 
+-- LLM 호출 한 번의 사용량(NFR-054). 호출마다 한 줄이고 메시지 본문은 남기지 않는다.
+-- 하루 한도(오늘 KST 합계)와 관리자 화면(날짜별·사용자별)이 읽는다. 회원은 Spring 소유라 FK를 두지 않는다.
+CREATE TABLE IF NOT EXISTS ai_usage (
+    id             BIGSERIAL    PRIMARY KEY,
+    created_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    user_id        BIGINT       NOT NULL,  -- 회원 ID(JWT의 sub)
+    model          TEXT         NOT NULL,
+    input_tokens   INTEGER      NOT NULL,
+    output_tokens  INTEGER      NOT NULL,  -- 추론 토큰은 출력에 든다
+    fallback       BOOLEAN      NOT NULL DEFAULT FALSE  -- 장애 대체 호출(NFR-056이 채운다)
+);
+
 -- 상세 보기(FR-016): 답변마다 발급한 detailId와 분석 조건. 보고서는 클릭할 때 이 조건으로 만든다.
 CREATE TABLE IF NOT EXISTS detail_condition (
     detail_id    TEXT         PRIMARY KEY,
@@ -211,6 +223,17 @@ def write_chat_log(
         conn,
         "INSERT INTO chat_log (thread_id, guard, node_ms) VALUES (%s, %s, %s)",
         (thread_id, guard, Jsonb(node_ms)),
+    )
+
+
+# LLM 호출 한 번의 사용량을 남긴다.
+def write_ai_usage(
+    conn: psycopg.Connection, user_id: int, model: str, input_tokens: int, output_tokens: int
+) -> None:
+    _execute_ensuring_schema(
+        conn,
+        "INSERT INTO ai_usage (user_id, model, input_tokens, output_tokens) VALUES (%s, %s, %s, %s)",
+        (user_id, model, input_tokens, output_tokens),
     )
 
 

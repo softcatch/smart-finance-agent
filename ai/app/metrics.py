@@ -25,7 +25,7 @@ LLM_SECONDS = Histogram("llm_call_seconds", "LLM 호출 시간", ["outcome"], bu
 EMBEDDING_SECONDS = Histogram("embedding_call_seconds", "임베딩 호출 시간", buckets=BUCKETS)
 OPENAI_ERRORS = Counter("openai_errors_total", "OpenAI 호출 오류", ["type"])
 LLM_TOKENS = Counter(
-    "llm_tokens_total", "LLM 토큰 수(추론 토큰은 출력에 든다). 비용 계산용", ["direction"]
+    "llm_tokens_total", "LLM 토큰 수(추론 토큰은 출력에 든다). 비용 계산용", ["direction", "model"]
 )
 GUARD = Counter("guard_decisions_total", "가드 판정 횟수", ["where", "code"])
 
@@ -42,26 +42,45 @@ def update_threadpool() -> None:
 
 
 class LlmMetrics(BaseCallbackHandler):
-    """채팅 모델 호출마다 시간·토큰·오류를 센다. 구조화 출력·답변·보고서가 모두 지나간다."""
+    """채팅 모델 호출마다 시간·토큰·오류를 센다. 구조화 출력·답변·보고서가 모두 지나간다.
 
-    def __init__(self) -> None:
-        self.started: dict[UUID, float] = {}
+    호출 설정의 metadata에 user_id가 있으면 record(회원 ID, 모델, 입력 토큰, 출력 토큰)로 사용량도 남긴다
+    (NFR-054). 성공한 호출만 남기고, 사용자가 없거나 record가 없으면 지표만 센다.
+    """
 
-    def on_chat_model_start(self, serialized, messages, *, run_id: UUID, **kwargs) -> None:
-        self.started[run_id] = time.perf_counter()
+    def __init__(self, record=None) -> None:
+        self.record = record
+        # 호출 → (시작 시각, 모델, 회원 ID)
+        self.started: dict[UUID, tuple[float, str, int | None]] = {}
+
+    def on_chat_model_start(
+        self, serialized, messages, *, run_id: UUID, metadata=None, **kwargs
+    ) -> None:
+        metadata = metadata or {}
+        self.started[run_id] = (
+            time.perf_counter(),
+            metadata.get("ls_model_name", "unknown"),
+            metadata.get("user_id"),
+        )
 
     def on_llm_end(self, response, *, run_id: UUID, **kwargs) -> None:
+        _, model, user_id = self.started.get(run_id, (0.0, "unknown", None))
+        input_tokens = output_tokens = 0
         for generations in response.generations:
             for generation in generations:
                 usage = generation.message.usage_metadata or {}
-                LLM_TOKENS.labels("input").inc(usage.get("input_tokens", 0))
-                LLM_TOKENS.labels("output").inc(usage.get("output_tokens", 0))
+                input_tokens += usage.get("input_tokens", 0)
+                output_tokens += usage.get("output_tokens", 0)
+        LLM_TOKENS.labels("input", model).inc(input_tokens)
+        LLM_TOKENS.labels("output", model).inc(output_tokens)
         self._observe(run_id, "ok")
+        if self.record and user_id is not None:  # 기록이 실패해도 위 지표는 이미 셌다
+            self.record(user_id, model, input_tokens, output_tokens)
 
     def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs) -> None:
         OPENAI_ERRORS.labels(type(error).__name__).inc()
         self._observe(run_id, "error")
 
     def _observe(self, run_id: UUID, outcome: str) -> None:
-        if (start := self.started.pop(run_id, None)) is not None:
-            LLM_SECONDS.labels(outcome).observe(time.perf_counter() - start)
+        if (call := self.started.pop(run_id, None)) is not None:
+            LLM_SECONDS.labels(outcome).observe(time.perf_counter() - call[0])
