@@ -12,6 +12,7 @@ from app.store import (
     search_business_chunks,
     upsert_companies,
     upsert_financials,
+    write_ai_usage,
     write_chat_log,
 )
 
@@ -320,3 +321,23 @@ def test_상세_보기_테이블이_아직_없어도_만들어서_저장하고_�
     save_detail(conn, "dt_1", "financial", ["005930"])
 
     assert load_detail(conn, "dt_1")["stock_codes"] == ["005930"]
+
+
+def test_AI_사용량을_호출마다_한_줄씩_남긴다(conn):
+    write_ai_usage(conn, 7, "gpt-5-nano", 1529, 550)
+    write_ai_usage(conn, 7, "gpt-5-nano", 300, 40)
+
+    rows = conn.execute(
+        "SELECT user_id, model, input_tokens, output_tokens, fallback FROM ai_usage ORDER BY id"
+    ).fetchall()
+
+    assert rows == [(7, "gpt-5-nano", 1529, 550, False), (7, "gpt-5-nano", 300, 40, False)]
+
+
+def test_사용량_테이블이_아직_없어도_만들어서_남긴다(conn):
+    conn.execute("DROP TABLE ai_usage")
+    conn.commit()
+
+    write_ai_usage(conn, 7, "gpt-5-nano", 10, 5)
+
+    assert conn.execute("SELECT user_id, input_tokens FROM ai_usage").fetchall() == [(7, 10)]
