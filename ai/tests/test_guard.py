@@ -1,6 +1,15 @@
 import pytest
 
-from app.guard import CANARY, check_output, is_injection, mask_pii, unverified_numbers
+from app.guard import (
+    CANARY,
+    check_output,
+    is_injection,
+    is_unknown_mark,
+    mask_pii,
+    pseudonymize,
+    restore,
+    unverified_numbers,
+)
 
 
 def test_주민번호_가림():
@@ -189,3 +198,69 @@ def test_근거에_없는_숫자가_있으면_숫자_미확인():
 
 def test_투자_권유가_숫자_미확인보다_먼저():
     assert check_output("목표주가는 10만원입니다", ["10"]) == "ADVICE"
+
+
+def test_계좌번호는_자리표시자로_바꾸고_대응표를_돌려준다():
+    text, table = pseudonymize("123456789012로 5000원 보내줘", {})
+
+    assert text == "[계좌1]로 5000원 보내줘"
+    assert table == {"[계좌1]": "123456789012"}
+
+
+def test_같은_번호는_같은_표기를_쓰고_새_번호는_다음_번호를_받는다():
+    first, table = pseudonymize("123456789012에서 987654321098로 보내줘", {})
+    again, table = pseudonymize(
+        "987654321098 말고 123456789012로 해줘, 그리고 555566667777도", table
+    )
+
+    assert first == "[계좌1]에서 [계좌2]로 보내줘"
+    assert again == "[계좌2] 말고 [계좌1]로 해줘, 그리고 [계좌3]도"
+    assert table == {
+        "[계좌1]": "123456789012",
+        "[계좌2]": "987654321098",
+        "[계좌3]": "555566667777",
+    }
+
+
+def test_받은_대응표는_바꾸지_않고_새로_만든다():
+    table = {"[계좌1]": "123456789012"}
+
+    pseudonymize("987654321098로", table)
+
+    assert table == {"[계좌1]": "123456789012"}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "엄마한테 1만원 보내줘",
+        "접수번호 20260814003699 문서가 뭐야",  # 14자리
+        "1234567890 로 보내줘",  # 10자리
+        "100000원 송금해 줘",
+        "2026-10-22 송금 내역 알려줘",
+    ],
+)
+def test_12자리_숫자가_아니면_가명화하지_않는다(text):
+    assert pseudonymize(text, {}) == (text, {})
+
+
+def test_송금_요청_직전에_자리표시자를_원래_번호로_되돌린다():
+    table = {"[계좌1]": "123456789012"}
+
+    assert restore({"amount": 5000, "recipient_account_number": "[계좌1]"}, table) == {
+        "amount": 5000,
+        "recipient_account_number": "123456789012",
+    }
+    # 자리표시자가 아닌 값(별칭·직접 말한 번호)은 그대로다
+    assert restore({"amount": 5000, "alias": "엄마"}, table) == {"amount": 5000, "alias": "엄마"}
+    raw = {"amount": 5000, "recipient_account_number": "987654321098"}
+    assert restore(raw, table) == raw
+
+
+def test_대응표에_없는_자리표시자는_지어낸_것이다():
+    table = {"[계좌1]": "123456789012"}
+
+    assert is_unknown_mark("[계좌9]", table)
+    assert not is_unknown_mark("[계좌1]", table)
+    assert not is_unknown_mark("123456789012", table)  # 번호 자체는 자리표시자가 아니다
+    assert not is_unknown_mark(None, table)

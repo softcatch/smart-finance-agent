@@ -26,7 +26,8 @@ class TransferSlots(BaseModel):
     )
     amount: int | None = Field(default=None, description="금액(원 단위 정수). 말하지 않았으면 null")
     recipient_account_number: str | None = Field(
-        default=None, description="수취인 계좌번호(숫자). 말하지 않았으면 null"
+        default=None,
+        description="수취인 계좌번호(숫자, 또는 [계좌1] 같은 가림 표기 그대로). 말하지 않았으면 null",
     )
     alias: str | None = Field(
         default=None, description="수취인 별칭(예: 엄마). 말하지 않았으면 null"

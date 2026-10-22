@@ -15,7 +15,10 @@ from app.guard import (
     OUTPUT_REPLIES,
     check_output,
     is_injection,
+    is_unknown_mark,
     mask_pii,
+    pseudonymize,
+    restore,
     unverified_numbers,
 )
 from app.history import ASK_PERIOD, history_reply, period_range, today_kst
@@ -40,7 +43,8 @@ EXTRACT_PROMPT = (
     "숫자는 해당하지 않는다). 기업의 회사 소개·주요 제품·사업 구조나 수주잔고·투자금·시장점유율 "
     "같은 사업 내용을 물으면 is_business=true이고 기업 이름을 companies에 말한 그대로 넣는다. "
     "말하지 않은 값은 null로 둔다. "
-    "금액은 원 단위 정수, 별칭은 들은 그대로 쓴다.\n진행 중인 송금: {pending}"
+    "금액은 원 단위 정수, 별칭은 들은 그대로 쓴다. 메시지의 [계좌1] 같은 표기는 가려 둔 계좌번호라서, "
+    "수취인 계좌번호이면 recipient_account_number에 그 표기를 그대로 넣는다.\n진행 중인 송금: {pending}"
 )
 SEARCH_DOWN_REPLY = "지금 공시 본문을 검색할 수 없습니다. 잠시 후 다시 시도해 주세요."
 NOT_FOUND_REPLY = "계좌나 별칭을 찾을 수 없습니다. 받는 분의 계좌번호나 별칭을 다시 알려 주세요."
@@ -55,6 +59,7 @@ NOT_FOUND_REPLY = "계좌나 별칭을 찾을 수 없습니다. 받는 분의 �
 # detail: 이번 답변의 상세 보기 조건({kind, stocks}). 재무 비교 표가 나갈 때만 채우고, 턴마다 비운다.
 # footer: 답변 끝에 붙이는 줄(출처 등 코드가 만든 것). unverified: 답변 숫자 중 근거에 없는 것. 둘 다 턴마다 비운다.
 # query: 재검색(NFR-052)에 쓴 검색어. None이면 이번 턴에 아직 재검색하지 않았다. 턴마다 비운다.
+# pseudonyms: 가명화한 계좌번호의 대응표({"[계좌1]": 번호}). 서버의 대화 상태에만 두고 LLM에는 보내지 않는다(NFR-055).
 # 근거 텍스트(공시 블록)는 상태에 두지 않는다 — 체크포인터에 쌓이지 않게 노드 안에서 대조한다.
 class ChatState(MessagesState, total=False):
     message: str
@@ -73,6 +78,7 @@ class ChatState(MessagesState, total=False):
     footer: str
     unverified: list[str]
     query: str | None
+    pseudonyms: dict
 
 
 # 입력 가드 → (인젝션이면 바로 종료) → 의도·값 추출 → 일반 답변 | 되묻기 | 송금 요청 생성 | 내역 조회 | 재무 비교
@@ -88,7 +94,9 @@ def build_graph(llm: Runnable, extractor=None, business_llm: Runnable | None = N
     business_llm = business_llm or llm
 
     def input_guard(state: ChatState) -> ChatState:
-        message = mask_pii(state["message"])
+        message, pseudonyms = pseudonymize(
+            mask_pii(state["message"]), state.get("pseudonyms") or {}
+        )
         if is_injection(message):  # 막힌 문장은 기록에 안 넣는다
             return {
                 "reply": INJECTION_REPLY,
@@ -102,6 +110,7 @@ def build_graph(llm: Runnable, extractor=None, business_llm: Runnable | None = N
             }
         return {
             "messages": [HumanMessage(message)],
+            "pseudonyms": pseudonyms,
             "guard": "PASS",
             "transfer_card": None,
             "table": None,
@@ -115,6 +124,9 @@ def build_graph(llm: Runnable, extractor=None, business_llm: Runnable | None = N
         pending = state.get("pending") or {}
         prompt = EXTRACT_PROMPT.format(pending=json.dumps(pending, ensure_ascii=False))
         slots = extractor.invoke([SystemMessage(prompt), state["messages"][-1]])
+        # LLM이 지어낸 [계좌N](대응표에 없는 표기)은 계좌번호가 아니다 — 비우면 수취인을 다시 묻는다
+        if is_unknown_mark(slots.recipient_account_number, state.get("pseudonyms") or {}):
+            slots.recipient_account_number = None
         if slots.is_transfer:  # 송금이 내역 조회·재무 비교보다 우선한다
             return {
                 "is_transfer": True,
@@ -147,8 +159,9 @@ def build_graph(llm: Runnable, extractor=None, business_llm: Runnable | None = N
         return {"messages": [AIMessage(reply)], "reply": reply}
 
     def create_request(state: ChatState, config: RunnableConfig) -> ChatState:
+        pending = restore(state["pending"], state.get("pseudonyms") or {})
         try:
-            card = config["configurable"]["create_transfer"](state["pending"])
+            card = config["configurable"]["create_transfer"](pending)
         except RecipientNotFound:  # 금액은 남기고 수취인만 다시 묻는다
             kept = {k: v for k, v in state["pending"].items() if k == "amount"}
             return {

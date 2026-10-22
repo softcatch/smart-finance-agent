@@ -26,6 +26,38 @@ def mask_pii(text: str) -> str:
     return _PHONE.sub("[전화번호]", _EMAIL.sub("[이메일]", text))
 
 
+# 수취인 계좌번호(NFR-055): 이 서비스가 발급하는 12자리 숫자. LLM은 값을 몰라도 어느 계좌인지만 알면 되어서
+# [계좌1]처럼 바꿔 보내고, 송금 요청을 만들기 직전에 코드가 되돌린다. 대응표(자리표시자 → 번호)는 대화 상태에만 둔다.
+_ACCOUNT = re.compile(r"(?<!\d)\d{12}(?!\d)")
+_ACCOUNT_MARK = re.compile(r"\[계좌\d+\]")
+
+
+# 계좌번호를 [계좌N]으로 바꾼다. 같은 번호는 같은 표기를 쓰고, 새 번호는 다음 번호를 받는다. → (바꾼 글, 대응표)
+def pseudonymize(text: str, table: dict[str, str]) -> tuple[str, dict[str, str]]:
+    table = dict(table)
+    marks = {number: mark for mark, number in table.items()}
+
+    def mark_of(match: re.Match) -> str:
+        number = match.group()
+        if number not in marks:
+            marks[number] = f"[계좌{len(table) + 1}]"
+            table[marks[number]] = number
+        return marks[number]
+
+    return _ACCOUNT.sub(mark_of, text), table
+
+
+# 대응표에 없는 [계좌N] 표기인가 — LLM이 지어낸 것이라 계좌번호로 쓸 수 없다.
+def is_unknown_mark(value: str | None, table: dict[str, str]) -> bool:
+    return bool(value and _ACCOUNT_MARK.fullmatch(value) and value not in table)
+
+
+# 송금 요청 도구(I-03)를 부르기 직전에 수취인 계좌의 자리표시자를 원래 번호로 되돌린다. 다른 값은 그대로다.
+def restore(pending: dict, table: dict[str, str]) -> dict:
+    account = pending.get("recipient_account_number")
+    return {**pending, "recipient_account_number": table[account]} if account in table else pending
+
+
 def is_injection(text: str) -> bool:
     return _INJECTION.search(text) is not None
 

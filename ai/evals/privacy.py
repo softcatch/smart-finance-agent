@@ -70,8 +70,12 @@ def run_case(turns: list[str], thread: str) -> tuple[list[str], list[str]]:
     return seen, received
 
 
-def main() -> None:
-    cases = [json.loads(line) for line in CASES.read_text(encoding="utf-8").splitlines()]
+def load_cases() -> list[dict]:
+    return [json.loads(line) for line in CASES.read_text(encoding="utf-8").splitlines()]
+
+
+# 세트 전체를 돌려 종류별 가려야 할 값 수·유출 수, 정상 문장 수·오탐 수, 확인할 예를 모은다.
+def evaluate(cases: list[dict]) -> dict:
     total: Counter = Counter()
     leaked: Counter = Counter()
     examples: list[str] = []
@@ -89,15 +93,29 @@ def main() -> None:
             if altered(case["turns"], received):
                 changed += 1
                 examples.append(f"오탐 {case['turns']} → {received}")
-    pii_cases = len(cases) - controls
+    return {
+        "total": total,
+        "leaked": leaked,
+        "pii_cases": len(cases) - controls,
+        "controls": controls,
+        "changed": changed,
+        "examples": examples,
+    }
+
+
+def main() -> None:
+    result = evaluate(load_cases())
+    total, leaked = result["total"], result["leaked"]
     print(
-        f"개인정보 문장 {pii_cases}개, 가려야 할 값 {sum(total.values())}개 — LLM이 받은 글에 원문이 남은 값:"
+        f"개인정보 문장 {result['pii_cases']}개, 가려야 할 값 {sum(total.values())}개 — "
+        "LLM이 받은 글에 원문이 남은 값:"
     )
     for kind in total:
         print(f"  {kind:<6} {leaked[kind]}/{total[kind]}")
     print(f"  합계   {sum(leaked.values())}/{sum(total.values())}")
+    controls, changed = result["controls"], result["changed"]
     print(f"정상 문장 {controls}개 중 잘못 가린 문장 {changed}개 (오탐률 {changed / controls:.0%})")
-    for line in examples:
+    for line in result["examples"]:
         print(f"  ✗ {line}")
 
 
