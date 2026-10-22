@@ -13,6 +13,8 @@ import json
 from collections import Counter
 from pathlib import Path
 
+import openai
+
 from app.graph import build_graph
 from app.guard import mask_pii
 from app.main import make_llm
@@ -49,8 +51,13 @@ def run_case(llm, extractor, case: dict, thread: str) -> dict | None:
 
 def main() -> None:
     cases = [json.loads(line) for line in CASES.read_text(encoding="utf-8").splitlines()]
-    llm = make_llm()
-    extractor = llm.with_structured_output(TransferSlots)
+    # 응답 없이 멈추거나 끊긴 호출 하나가 몇 분짜리 측정을 망치지 않게 타임아웃을 두고 일시 오류는 다시 보낸다.
+    # 앱의 동작이 아니라 측정 도구의 안전장치다(정확도에는 영향이 없다).
+    llm = make_llm(timeout=30)
+    extractor = llm.with_structured_output(TransferSlots).with_retry(
+        retry_if_exception_type=(openai.APIConnectionError, openai.InternalServerError),
+        stop_after_attempt=3,
+    )
     scores: dict[str, list[int]] = {"계좌번호": [], "별칭": []}
     failed: Counter = Counter()
     got: dict[str, dict | None] = {}
