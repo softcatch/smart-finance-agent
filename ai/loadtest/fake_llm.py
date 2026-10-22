@@ -1,11 +1,14 @@
 """가짜 LLM(NFR-029): OpenAI 호환 서버. 부하 테스트에서 LLM 자리를 대신한다.
 
-FastAPI가 쓰는 두 경로만 흉내 낸다 — /v1/chat/completions(일반 답변·구조화 출력)와 /v1/embeddings.
+FastAPI가 쓰는 경로만 흉내 낸다 — /v1/chat/completions(일반 답변·구조화 출력)와 /v1/embeddings,
+그리고 장애 대체(NFR-056)가 쓰는 Anthropic 형식의 /v1/messages(일반 답변·강제 도구 호출).
 응답 지연은 실제 OpenAI를 재서 남긴 분포(latency.json)에서 호출 종류별로 뽑는다. 시드가 같으면 같은 순서다.
 내용은 부하 시나리오의 문장 꼴만 알아듣는 규칙 기반이다(의도 인식 품질은 evals가 실제 LLM으로 잰다).
+create_app의 openai·anthropic 인자(Faults)로 경로마다 오류와 멈춤을 넣는다.
 앱은 코드 변경 없이 환경변수만 바꾼다:
     uvicorn loadtest.fake_llm:app --port 9000        (ai/에서)
     OPENAI_BASE_URL=http://localhost:9000/v1  OPENAI_API_KEY=fake  (FastAPI 쪽)
+    ANTHROPIC_API_URL=http://localhost:9000  ANTHROPIC_API_KEY=fake  (대체 쪽)
 FAKE_LLM_SEED로 시드를 바꾼다(기본 1).
 """
 
@@ -21,10 +24,12 @@ import struct
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 LATENCY = Path(__file__).with_name("latency.json")
 EMBEDDING_DIM = 1536  # text-embedding-3-small
@@ -88,6 +93,20 @@ ANSWERS = {
 }
 
 
+@dataclass(frozen=True)
+class Faults:
+    """장애 주입(NFR-056). 요청마다 난수 하나로 정한다: error_rate 비율은 status 오류로 답하고,
+    이어서 hang_rate 비율은 hang_s초 멈춘 뒤 정상으로 답한다(클라이언트는 그 전에 타임아웃으로 끊는다)."""
+
+    error_rate: float = 0.0
+    status: int = 503
+    hang_rate: float = 0.0
+    hang_s: float = 30.0
+
+
+NO_FAULTS = Faults()
+
+
 class Delays:
     """호출 종류별로 실측 표본에서 하나씩 뽑는다. 종류마다 시드가 고정된 난수열을 따로 쓴다."""
 
@@ -148,6 +167,13 @@ def embedding_vector(text: str) -> list[float]:
     return [x / norm for x in vector]
 
 
+# 호출 종류를 요청 모양으로 가른다: 구조화 출력은 의도 추출, 아니면 시스템 프롬프트의 구분자로 가른다.
+def _kind(system: str, structured: bool) -> str:
+    if structured:
+        return "extract"
+    return "business" if "<공시>" in system else "report" if "<표>" in system else "answer"
+
+
 def _text(message: dict) -> str:
     content = message.get("content")
     if isinstance(content, list):  # 조각 목록이면 글 조각만 잇는다
@@ -155,27 +181,48 @@ def _text(message: dict) -> str:
     return content or ""
 
 
-def create_app(samples_ms: dict[str, list[int]], seed: int = 1) -> FastAPI:
+def create_app(
+    samples_ms: dict[str, list[int]],
+    seed: int = 1,
+    openai: Faults = NO_FAULTS,
+    anthropic: Faults = NO_FAULTS,
+) -> FastAPI:
     if missing := set(KINDS) - samples_ms.keys():
         raise ValueError(f"지연 표본이 없는 호출 종류: {sorted(missing)}")
     app = FastAPI(title="fake-llm")
     delays = Delays(samples_ms, seed)
+    fault_rngs = {
+        route: random.Random(f"{seed}:fault:{route}") for route in ("openai", "anthropic")
+    }
+
+    # 오류면 그 응답을 돌려주고, 멈춤이면 기다린 뒤 None(정상으로 이어 간다). 경로마다 난수열이 따로다.
+    async def inject(route: str, faults: Faults, error: dict) -> JSONResponse | None:
+        draw = fault_rngs[route].random()
+        if draw < faults.error_rate:
+            return JSONResponse(error, status_code=faults.status)
+        if draw < faults.error_rate + faults.hang_rate:
+            await asyncio.sleep(faults.hang_s)
+        return None
 
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "UP"}
 
     @app.post("/v1/chat/completions")
-    async def chat_completions(request: Request) -> dict:
+    async def chat_completions(request: Request):
         body = await request.json()
+        if failure := await inject(
+            "openai", openai, {"error": {"message": "injected", "type": "server_error"}}
+        ):
+            return failure
         messages = body["messages"]
         system = "\n".join(_text(m) for m in messages if m["role"] in ("system", "developer"))
         user = next((_text(m) for m in reversed(messages) if m["role"] == "user"), "")
-        if (body.get("response_format") or {}).get("type") == "json_schema":
-            kind, content = "extract", json.dumps(extract_slots(user), ensure_ascii=False)
-        else:
-            kind = "business" if "<공시>" in system else "report" if "<표>" in system else "answer"
-            content = ANSWERS[kind]
+        structured = (body.get("response_format") or {}).get("type") == "json_schema"
+        kind = _kind(system, structured)
+        content = (
+            json.dumps(extract_slots(user), ensure_ascii=False) if structured else ANSWERS[kind]
+        )
         await asyncio.sleep(delays.next(kind))
         return {
             "id": "chatcmpl-fake",
@@ -190,6 +237,39 @@ def create_app(samples_ms: dict[str, list[int]], seed: int = 1) -> FastAPI:
                 }
             ],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
+
+    # Anthropic Messages API(장애 대체). 구조화 출력은 강제 도구 호출이라 tools가 있으면 의도 추출이다.
+    @app.post("/v1/messages")
+    async def messages(request: Request):
+        body = await request.json()
+        if failure := await inject(
+            "anthropic",
+            anthropic,
+            {"type": "error", "error": {"type": "api_error", "message": "injected"}},
+        ):
+            return failure
+        system = _text({"content": body.get("system")})
+        user = next((_text(m) for m in reversed(body["messages"]) if m["role"] == "user"), "")
+        tools = body.get("tools")
+        kind = _kind(system, bool(tools))
+        if tools:
+            slots = extract_slots(user)
+            content = [
+                {"type": "tool_use", "id": "toolu_fake", "name": tools[0]["name"], "input": slots}
+            ]
+        else:
+            content = [{"type": "text", "text": ANSWERS[kind]}]
+        await asyncio.sleep(delays.next(kind))
+        return {
+            "id": "msg_fake",
+            "type": "message",
+            "role": "assistant",
+            "model": body.get("model", "fake"),
+            "content": content,
+            "stop_reason": "tool_use" if tools else "end_turn",
+            "stop_sequence": None,
+            "usage": {"input_tokens": 0, "output_tokens": 0},
         }
 
     @app.post("/v1/embeddings")
