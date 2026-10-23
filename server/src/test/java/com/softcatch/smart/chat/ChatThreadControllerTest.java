@@ -6,6 +6,7 @@ import com.softcatch.smart.TestcontainersConfiguration;
 import com.softcatch.smart.auth.dto.request.LoginRequest;
 import com.softcatch.smart.auth.dto.request.SignupRequest;
 import java.io.IOException;
+import java.time.OffsetDateTime;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,6 +16,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
@@ -56,11 +58,19 @@ class ChatThreadControllerTest {
   @Autowired private MockMvc mockMvc;
   @Autowired private ChatThreadRepository chatThreads;
   @Autowired private ChatDetailRepository chatDetails;
+  @Autowired private JdbcTemplate jdbc;
   private final ObjectMapper json = new ObjectMapper();
+  private AiUsageFixture usage;
 
   @BeforeEach
   void resetFakeAi() {
     FAKE_AI.reset();
+  }
+
+  @BeforeEach
+  void createUsageTable() {
+    usage = new AiUsageFixture(jdbc);
+    usage.create();
   }
 
   @Test
@@ -373,6 +383,116 @@ class ChatThreadControllerTest {
     FAKE_AI.status = 500;
 
     getDetail(session.token(), detailId).andExpect(MockMvcResultMatchers.status().isOk());
+  }
+
+  @Test
+  void 정지된_회원은_403_AI_BLOCKED이고_FastAPI를_부르지_않는다() throws Exception {
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "정지1");
+    String threadId = createThread(session.token());
+    String detailId = ownedDetail(session);
+    blockAi(session);
+
+    sendMessage(session.token(), threadId)
+        .andExpect(MockMvcResultMatchers.status().isForbidden())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("AI_BLOCKED"));
+    getDetail(session.token(), detailId)
+        .andExpect(MockMvcResultMatchers.status().isForbidden())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("AI_BLOCKED"));
+
+    Assertions.assertEquals(0, FAKE_AI.calls.get());
+    Assertions.assertEquals(0, FAKE_AI.detailCalls.get());
+  }
+
+  @Test
+  void 정지돼도_계좌_API는_정상이다() throws Exception {
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "정지2");
+    blockAi(session);
+
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.get("/api/v1/accounts")
+                .header("Authorization", "Bearer " + session.token()))
+        .andExpect(MockMvcResultMatchers.status().isOk());
+  }
+
+  @Test
+  void 오늘_토큰_합계가_한도_이상이면_429_AI_QUOTA_EXCEEDED이고_FastAPI를_부르지_않는다() throws Exception {
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "한도1");
+    String threadId = createThread(session.token());
+    String detailId = ownedDetail(session);
+    usage.addNow(session.memberId(), 300_000, 150_000);
+    usage.addNow(session.memberId(), 0, 50_000); // 입력+출력, 여러 줄의 합이 한도(500,000)와 같다
+
+    sendMessage(session.token(), threadId)
+        .andExpect(MockMvcResultMatchers.status().isTooManyRequests())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("AI_QUOTA_EXCEEDED"));
+    getDetail(session.token(), detailId)
+        .andExpect(MockMvcResultMatchers.status().isTooManyRequests())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("AI_QUOTA_EXCEEDED"));
+
+    Assertions.assertEquals(0, FAKE_AI.calls.get());
+    Assertions.assertEquals(0, FAKE_AI.detailCalls.get());
+  }
+
+  @Test
+  void 한도_바로_아래면_통과한다() throws Exception {
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "한도2");
+    String threadId = createThread(session.token());
+    usage.addNow(session.memberId(), 300_000, 199_999);
+
+    sendMessage(session.token(), threadId).andExpect(MockMvcResultMatchers.status().isOk());
+  }
+
+  @Test
+  void 어제_사용분은_세지_않고_오늘_0시_정각부터_센다() throws Exception {
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "한도3");
+    String threadId = createThread(session.token());
+    OffsetDateTime midnight = AiUsageFixture.startOfTodayKst();
+
+    usage.add(session.memberId(), "gpt-5-nano", 600_000, 0, false, midnight.minusMinutes(1));
+    sendMessage(session.token(), threadId).andExpect(MockMvcResultMatchers.status().isOk());
+
+    usage.add(session.memberId(), "gpt-5-nano", 500_000, 0, false, midnight);
+    sendMessage(session.token(), threadId)
+        .andExpect(MockMvcResultMatchers.status().isTooManyRequests());
+  }
+
+  @Test
+  void 다른_회원의_사용량은_세지_않는다() throws Exception {
+    MemberSession heavy = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "많이쓴사람");
+    MemberSession light = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "적게쓴사람");
+    usage.addNow(heavy.memberId(), 600_000, 0);
+
+    sendMessage(light.token(), createThread(light.token()))
+        .andExpect(MockMvcResultMatchers.status().isOk());
+  }
+
+  @Test
+  void 정지와_한도가_겹치면_AI_BLOCKED가_먼저다() throws Exception {
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "겹침");
+    String threadId = createThread(session.token());
+    blockAi(session);
+    usage.addNow(session.memberId(), 600_000, 0);
+
+    sendMessage(session.token(), threadId)
+        .andExpect(MockMvcResultMatchers.status().isForbidden())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("AI_BLOCKED"));
+  }
+
+  @Test
+  void ai_usage_테이블이_아직_없어도_채팅과_상세_보기가_동작한다() throws Exception {
+    MemberSession session = signupAndLogin("chat" + System.nanoTime(), "pw12345!", "첫기록전");
+    String threadId = createThread(session.token());
+    String detailId = ownedDetail(session);
+    usage.drop(); // FastAPI가 첫 기록 때 만들기 전
+
+    sendMessage(session.token(), threadId).andExpect(MockMvcResultMatchers.status().isOk());
+    getDetail(session.token(), detailId).andExpect(MockMvcResultMatchers.status().isOk());
+  }
+
+  // 관리자 정지(E-17)와 같은 상태로 만든다.
+  private void blockAi(MemberSession session) {
+    jdbc.update("UPDATE member SET ai_blocked = TRUE WHERE id = ?", session.memberId());
   }
 
   // 채팅 응답으로 발급된 상세 보기 ID를 본인 것으로 만든다(FAKE_AI가 detailId가 든 응답을 준다).

@@ -12,16 +12,19 @@ class ChatMessageService {
   private final ChatThreadRepository chatThreads;
   private final ChatDetailRepository chatDetails;
   private final ChatRateLimiter rateLimiter;
+  private final AiUsageGuard usageGuard;
   private final AiClient aiClient;
 
   ChatMessageService(
       ChatThreadRepository chatThreads,
       ChatDetailRepository chatDetails,
       ChatRateLimiter rateLimiter,
+      AiUsageGuard usageGuard,
       AiClient aiClient) {
     this.chatThreads = chatThreads;
     this.chatDetails = chatDetails;
     this.rateLimiter = rateLimiter;
+    this.usageGuard = usageGuard;
     this.aiClient = aiClient;
   }
 
@@ -32,6 +35,7 @@ class ChatMessageService {
         .filter(thread -> thread.getMemberId().equals(memberId))
         .orElseThrow(() -> new ApiException(ErrorCode.THREAD_NOT_FOUND));
     rateLimiter.check(memberId);
+    usageGuard.check(memberId); // 정지·하루 한도(NFR-054). 걸리면 FastAPI를 부르지 않는다
     ChatMessageResponse response = aiClient.chat(token, threadId, message);
     // 답변에 상세 보기 ID가 붙어 오면 누구 것인지 기록한다(E-13의 본인 확인용)
     if (response.detailId() != null) {

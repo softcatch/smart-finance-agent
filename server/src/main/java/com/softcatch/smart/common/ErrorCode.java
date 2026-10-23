@@ -20,7 +20,9 @@ public enum ErrorCode {
   RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요"),
   AI_SERVER_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AI 서버에 연결할 수 없습니다"),
   ADMIN_ONLY(HttpStatus.FORBIDDEN, "관리자만 사용할 수 있습니다"),
-  MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다");
+  MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "회원을 찾을 수 없습니다"),
+  AI_BLOCKED(HttpStatus.FORBIDDEN, "AI 사용이 정지된 계정입니다"),
+  AI_QUOTA_EXCEEDED(HttpStatus.TOO_MANY_REQUESTS, "오늘 AI 사용 한도를 넘었습니다. 내일 다시 이용해 주세요");
 
   final HttpStatus status;
   final String message;

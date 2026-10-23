@@ -10,10 +10,12 @@ import org.springframework.stereotype.Service;
 class ChatDetailService {
 
   private final ChatDetailRepository chatDetails;
+  private final AiUsageGuard usageGuard;
   private final AiClient aiClient;
 
-  ChatDetailService(ChatDetailRepository chatDetails, AiClient aiClient) {
+  ChatDetailService(ChatDetailRepository chatDetails, AiUsageGuard usageGuard, AiClient aiClient) {
     this.chatDetails = chatDetails;
+    this.usageGuard = usageGuard;
     this.aiClient = aiClient;
   }
 
@@ -23,6 +25,7 @@ class ChatDetailService {
         .findByDetailId(detailId)
         .filter(detail -> detail.getMemberId().equals(memberId))
         .orElseThrow(() -> new ApiException(ErrorCode.DETAIL_NOT_FOUND));
+    usageGuard.check(memberId); // 정지·하루 한도(NFR-054). 걸리면 FastAPI를 부르지 않는다
     return aiClient.detail(token, detailId);
   }
 }
