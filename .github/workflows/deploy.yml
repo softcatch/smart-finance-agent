@@ -1,6 +1,6 @@
 name: Deploy
 
-# main에 머지(push)되면 이미지를 빌드해 Docker Hub에 올리고, 홈서버에 SSH로 접속해 새 이미지로 다시 띄운다.
+# main에 머지(push)되면 이미지(server·ai·proxy)를 빌드해 Docker Hub에 올리고, 홈서버에 SSH로 접속해 새 이미지로 다시 띄운다.
 # 필요한 Secrets·Variables와 서버 준비는 README의 '배포' 절을 본다.
 on:
   push:
@@ -101,6 +101,20 @@ jobs:
           cache-from: type=gha,scope=ai
           cache-to: type=gha,scope=ai,mode=max
 
+      # 입구(nginx, NFR-053). 설정이 이미지 안에 있어서 compose.yaml만 복사하면 된다.
+      - name: proxy 이미지
+        uses: docker/build-push-action@v7
+        with:
+          context: nginx
+          platforms: linux/amd64,linux/arm64
+          provenance: false
+          push: true
+          tags: |
+            ${{ env.DOCKERHUB_USERNAME }}/smart-finance-agent-proxy:latest
+            ${{ env.DOCKERHUB_USERNAME }}/smart-finance-agent-proxy:${{ steps.tag.outputs.value }}
+          cache-from: type=gha,scope=proxy
+          cache-to: type=gha,scope=proxy,mode=max
+
       # compose.yaml은 매번 서버에 맞춰 둔다. .env(비밀값)는 서버에만 있다.
       - name: 홈서버에 배포
         env:
@@ -117,26 +131,38 @@ jobs:
             echo "~/smart-finance-agent/.env가 없습니다. README의 '배포' 절을 따라 만들어 주세요."
             exit 1
           fi
+          # 입구(nginx)에 필요한 값이 없으면 실행 중인 컨테이너를 건드리기 전에 멈춘다.
+          # Spring 8080은 127.0.0.1에만 열려서, 입구 없이 올리면 밖에서 닿지 않는다.
+          for key in DOMAIN LETSENCRYPT_EMAIL; do
+            if ! grep -Eq "^$key=.+" .env; then
+              echo "~/smart-finance-agent/.env에 $key가 없습니다. README의 '배포' 절(도메인·HTTPS)을 따라 넣어 주세요."
+              exit 1
+            fi
+          done
           # Docker Hub 이미지를 받아 compose가 쓰는 이름으로 태그한다.
-          for name in server ai; do
+          for name in server ai proxy; do
             docker pull "$DOCKERHUB_USERNAME/smart-finance-agent-$name:$IMAGE_TAG"
             docker tag "$DOCKERHUB_USERNAME/smart-finance-agent-$name:$IMAGE_TAG" "smart-finance-agent-$name:latest"
           done
-          docker compose up -d
+          docker compose --profile proxy up -d
           # 이전 배포의 이미지는 지운다. Docker Hub에 남아 있어 필요하면 다시 받을 수 있다.
-          for name in server ai; do
+          for name in server ai proxy; do
             docker images --format '{{.Repository}}:{{.Tag}}' "$DOCKERHUB_USERNAME/smart-finance-agent-$name" \
               | grep -v ":$IMAGE_TAG\$" | xargs -r docker rmi || true
           done
           # 서버가 올라왔는지 본다(Flyway 마이그레이션 때문에 수십 초 걸릴 수 있다).
+          DOMAIN=$(grep -E '^DOMAIN=' .env | cut -d= -f2-)
           for _ in $(seq 40); do
             if curl -fsS http://localhost:8080/actuator/health > /dev/null; then
-              echo "배포 완료: $IMAGE_TAG"
-              exit 0
+              # 입구(nginx)도 도메인으로 받는지 본다. 인증서는 처음에는 자체 서명일 수 있어 -k다.
+              if curl -fsSk --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/login" > /dev/null; then
+                echo "배포 완료: $IMAGE_TAG"
+                exit 0
+              fi
             fi
             sleep 3
           done
-          docker compose ps
-          docker compose logs --tail=50 server
+          docker compose --profile proxy ps
+          docker compose --profile proxy logs --tail=50 server nginx
           exit 1
           REMOTE
