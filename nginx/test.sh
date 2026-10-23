@@ -65,6 +65,12 @@ for p in /internal/transfer-requests /internal /actuator/health /actuator; do
   check "$p → 404" $([ "$(code $HTTPS$p)" = 404 ]; echo $?)
 done
 check "/internalx는 막지 않는다(정확히 /internal과 그 아래만)" $([ "$(code $HTTPS/internalx)" = 200 ]; echo $?)
+# 경로의 세미콜론(행렬 매개변수)은 nginx에는 경로의 일부지만 Tomcat·Spring은 떼어 내고 매핑한다.
+# 그대로 두면 /internal;x=1/… 이나 /api/v1/auth/login;x=1이 내부 경로 차단과 요청 제한을 건너뛴다.
+for p in '/internal;x=1/transfer-requests' '/actuator;x=1/health' '/api/v1/auth/login;x=1' '/internal%3Bx=1/transfer-requests'; do
+  check "$p → 400(세미콜론 경로는 받지 않는다)" $([ "$(code -X POST $HTTPS$p)" = 400 ]; echo $?)
+done
+check "쿼리 문자열의 세미콜론은 괜찮다(경로만 본다)" $([ "$(code "$HTTPS/echo/q?a=1;b=2")" = 200 ]; echo $?)
 
 echo "스트림 버퍼링"
 fast=$(first_byte_seconds $HTTPS/api/v1/notifications/stream)

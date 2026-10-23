@@ -39,6 +39,13 @@ server {
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_connect_timeout 5s;
 
+    # 경로의 세미콜론(행렬 매개변수 `;x=1`, 인코딩된 `%3B`)은 받지 않는다. nginx는 경로의 일부로 보지만 Tomcat·Spring은
+    # 떼어 내고 매핑해서, 아래 location(내부 경로 차단·요청 제한)을 건너뛰는 데 쓸 수 있다. Spring Security도 400으로
+    # 거절하지만 입구의 보장이 그 기본값에 기대지 않게 여기서도 거절한다. 쿼리 문자열은 $uri에 없어서 영향이 없다.
+    if ($uri ~ ";") {
+        return 400;
+    }
+
     # 내부용 경로는 밖에서 부르지 않는다(NFR-005): Spring↔FastAPI 내부 API와 운영 지표.
     location ~ ^/(internal|actuator)(/|$) {
         return 404;

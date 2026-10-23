@@ -246,9 +246,9 @@ AI 채팅으로 송금하고, DART 공시를 검색·분석하는 서비스.
   - **요청 경로**: 80은 인증서 발급 경로만 열고 443으로 301, 443에서 TLS(HTTP/2)를 끝낸다. `Host`·`X-Forwarded-For`(클라이언트가 보낸 값을 믿지 않고 실제 접속 IP로 덮어쓴다)·`X-Forwarded-Proto`를 넘기고, Spring은 `server.forward-headers-strategy=native`로 알아본다(Tomcat이 내부망의 프록시가 보낸 헤더만 믿는다). upstream 이름은 요청마다 Docker DNS로 다시 풀어서, 배포로 Spring 컨테이너가 다시 만들어져 IP가 바뀌어도 따라간다.
   - **읽기 제한·스트림**: 일반 60초(채팅 10초·상세 30초보다 길다). 알림 스트림(E-15)은 버퍼링을 끄고 120초(하트비트 15초보다 길다).
   - **요청 제한**: 로그인·가입은 IP별 분당 10회에 연속 5회까지 허용하고, 넘으면 앱과 같은 JSON 형식의 429 `RATE_LIMITED`를 준다. 둘이 한도를 나눠 쓴다.
-  - **막는 경로**: `/internal/**`(Spring의 FastAPI용 내부 API)와 `/actuator/**`는 입구에서 404다(NFR-005와 같은 경계). 서버 안에서 `curl localhost:8080/actuator/health`로 본다.
+  - **막는 경로**: `/internal/**`(Spring의 FastAPI용 내부 API)와 `/actuator/**`는 입구에서 404다(NFR-005와 같은 경계). 서버 안에서 `curl localhost:8080/actuator/health`로 본다. 경로에 세미콜론(`;x=1`, 인코딩된 `%3B`)이 있으면 400으로 거절한다 — nginx는 경로의 일부로 보지만 Tomcat·Spring은 떼어 내고 매핑해서 위 차단·요청 제한을 건너뛰는 데 쓸 수 있기 때문이다(Spring Security 방화벽도 400으로 거절하지만 입구의 보장이 그 기본값에 기대지 않게 한다). 쿼리 문자열의 세미콜론은 상관없다.
 - **검증**:
-  ① `nginx/test.sh`(CI 잡 `proxy`) — 자체 서명 인증서와 가짜 upstream으로 리다이렉트·인증서 발급 경로·헤더(스푸핑한 `X-Forwarded-For` 덮어쓰기)·차단 경로·스트림 버퍼링(끈 경로는 첫 글자까지 1초, 대조로 켜진 경로는 5초)·읽기 제한 설정·upstream이 바뀌어도 따라감·인증서 교체 후 재로드·요청 제한(연속 20번 중 6번 통과·14번 429)을 확인한다. 각 항목을 빼거나 바꾸면 실패하는 것도 확인했다.
+  ① `nginx/test.sh`(CI 잡 `proxy`) — 자체 서명 인증서와 가짜 upstream으로 리다이렉트·인증서 발급 경로·헤더(스푸핑한 `X-Forwarded-For` 덮어쓰기)·차단 경로(세미콜론 경로 400 포함)·스트림 버퍼링(끈 경로는 첫 글자까지 1초, 대조로 켜진 경로는 5초)·읽기 제한 설정·upstream이 바뀌어도 따라감·인증서 교체 후 재로드·요청 제한(연속 20번 중 6번 통과·14번 429)을 확인한다. 각 항목을 빼거나 바꾸면 실패하는 것도 확인했다.
   ② 실제 이미지 조합(Spring·PostgreSQL·nginx, 자체 서명 인증서): 로그인 화면이 HTTP/2로 200, http는 https로 301, 가입·로그인·계좌·송금 확정, 알림 스트림(연결 즉시 `: connected`, 확정하면 이벤트, 15초 간격 `: ping`), 입구에서 `/actuator`·`/internal`은 404(직접 `127.0.0.1:8080`은 200), 로그인 연속 20번은 6번 통과(401) 뒤 14번 429, Spring 8080은 `127.0.0.1`에만 열림.
   ③ certbot: 컨테이너가 실제로 받는 반복 스크립트를 가짜 certbot으로 돌려 인자(`--cert-name`·`--staging`)와 `/certs` 복사를 확인했고, 진짜 certbot이 Let's Encrypt 스테이징에 계정을 만들고 인증 요청까지 가는 것(존재하지 않는 도메인이라 DNS 확인에서 실패)을 확인했다.
   ④ `server.forward-headers-strategy=native`: 실제 Tomcat으로 `X-Forwarded-For`·`X-Forwarded-Proto`를 알아보는지 테스트한다(설정을 빼면 실패).
