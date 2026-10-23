@@ -1,6 +1,16 @@
 import pytest
 
-from app.guard import CANARY, check_output, is_injection, mask_pii, unverified_numbers
+from app.guard import (
+    CANARY,
+    check_output,
+    is_injection,
+    is_unknown_mark,
+    mask_pii,
+    normalize_mark,
+    pseudonymize,
+    restore,
+    unverified_numbers,
+)
 
 
 def test_주민번호_가림():
@@ -14,8 +24,69 @@ def test_카드번호_가림():
     assert mask_pii("1234567890123456") == "[카드번호]"
 
 
-def test_개인정보_없으면_그대로():
-    assert mask_pii("엄마한테 1만원 보내줘") == "엄마한테 1만원 보내줘"
+@pytest.mark.parametrize(
+    "number",
+    [
+        "010-1234-5678",
+        "01012345678",
+        "010 1234 5678",
+        "010.1234.5678",
+        "016-123-4567",
+        "+82 10-1234-5678",
+        "+82-10-1234-5678",
+        "+82 2-1234-5678",  # 국가번호가 있으면 지역번호의 앞 0을 생략한다
+        "+82 31-123-4567",
+        "+82-2-123-4567",
+        "+82 2 1234 5678",
+        "02-123-4567",
+        "02-1234-5678",
+        "031-123-4567",
+        "0212345678",
+    ],
+)
+def test_전화번호_가림(number):
+    assert mask_pii(f"내 번호는 {number}이야") == "내 번호는 [전화번호]이야"
+
+
+@pytest.mark.parametrize(
+    "email", ["hong.gildong@example.com", "hong+bank@example.co.kr", "a_b-c@sub.example.com"]
+)
+def test_이메일_가림(email):
+    assert mask_pii(f"메일은 {email} 이야") == "메일은 [이메일] 이야"
+
+
+def test_이메일_안의_숫자는_전화번호보다_이메일로_가린다():
+    assert mask_pii("01012345678@naver.com으로 보내줘") == "[이메일]으로 보내줘"
+
+
+def test_여러_개인정보가_한_문장에_있어도_모두_가린다():
+    text = "010-1234-5678이고 메일은 a@b.com, 주민번호는 900101-1234567, 카드는 1234-5678-9012-3456"
+
+    assert (
+        mask_pii(text) == "[전화번호]이고 메일은 [이메일], 주민번호는 [주민번호], 카드는 [카드번호]"
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "엄마한테 1만원 보내줘",
+        "1,000,000원 보내줘",
+        "100000원 송금해 줘",
+        "삼성전자 영업이익 6,685,272,000,000원이 맞아?",
+        "2026-10-22 송금 내역 알려줘",
+        "2026.10.22부터 오늘까지 얼마 보냈어?",
+        "20261022 기준으로 알려줘",
+        "접수번호 20260814003699 문서가 뭐야",
+        "종목코드 005930 사업 내용 알려줘",
+        "3분기 매출액 79140503000000원 맞아?",
+        "123456789012로 5000원 보내줘",  # 계좌번호는 가명화(graph)가 맡는다
+        "금리 3.5%로 1억 빌렸어",
+        "12:30에 만나",
+    ],
+)
+def test_개인정보_없으면_그대로(text):
+    assert mask_pii(text) == text
 
 
 @pytest.mark.parametrize(
@@ -132,3 +203,87 @@ def test_근거에_없는_숫자가_있으면_숫자_미확인():
 
 def test_투자_권유가_숫자_미확인보다_먼저():
     assert check_output("목표주가는 10만원입니다", ["10"]) == "ADVICE"
+
+
+def test_계좌번호는_자리표시자로_바꾸고_대응표를_돌려준다():
+    text, table = pseudonymize("123456789012로 5000원 보내줘", {})
+
+    assert text == "[계좌1]로 5000원 보내줘"
+    assert table == {"[계좌1]": "123456789012"}
+
+
+def test_같은_번호는_같은_표기를_쓰고_새_번호는_다음_번호를_받는다():
+    first, table = pseudonymize("123456789012에서 987654321098로 보내줘", {})
+    again, table = pseudonymize(
+        "987654321098 말고 123456789012로 해줘, 그리고 555566667777도", table
+    )
+
+    assert first == "[계좌1]에서 [계좌2]로 보내줘"
+    assert again == "[계좌2] 말고 [계좌1]로 해줘, 그리고 [계좌3]도"
+    assert table == {
+        "[계좌1]": "123456789012",
+        "[계좌2]": "987654321098",
+        "[계좌3]": "555566667777",
+    }
+
+
+def test_받은_대응표는_바꾸지_않고_새로_만든다():
+    table = {"[계좌1]": "123456789012"}
+
+    pseudonymize("987654321098로", table)
+
+    assert table == {"[계좌1]": "123456789012"}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "엄마한테 1만원 보내줘",
+        "접수번호 20260814003699 문서가 뭐야",  # 14자리
+        "1234567890 로 보내줘",  # 10자리
+        "100000원 송금해 줘",
+        "2026-10-22 송금 내역 알려줘",
+    ],
+)
+def test_12자리_숫자가_아니면_가명화하지_않는다(text):
+    assert pseudonymize(text, {}) == (text, {})
+
+
+def test_송금_요청_직전에_자리표시자를_원래_번호로_되돌린다():
+    table = {"[계좌1]": "123456789012"}
+
+    assert restore({"amount": 5000, "recipient_account_number": "[계좌1]"}, table) == {
+        "amount": 5000,
+        "recipient_account_number": "123456789012",
+    }
+    # 자리표시자가 아닌 값(별칭·직접 말한 번호)은 그대로다
+    assert restore({"amount": 5000, "alias": "엄마"}, table) == {"amount": 5000, "alias": "엄마"}
+    raw = {"amount": 5000, "recipient_account_number": "987654321098"}
+    assert restore(raw, table) == raw
+
+
+def test_대응표에_없는_자리표시자는_지어낸_것이다():
+    table = {"[계좌1]": "123456789012"}
+
+    assert is_unknown_mark("[계좌9]", table)
+    assert not is_unknown_mark("[계좌1]", table)
+    assert not is_unknown_mark("123456789012", table)  # 번호 자체는 자리표시자가 아니다
+    assert not is_unknown_mark(None, table)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("[계좌1]", "[계좌1]"),
+        ("계좌 [계좌1]", "[계좌1]"),  # 앞말을 붙여 돌려줘도
+        ("계좌1", "[계좌1]"),  # 대괄호를 빼도
+        ("[계좌12]로", "[계좌12]"),
+        ("123456789012", "123456789012"),  # 번호·별칭·없음은 그대로다
+        ("계좌 123456789012", "계좌 123456789012"),
+        ("계좌번호", "계좌번호"),
+        ("엄마", "엄마"),
+        (None, None),
+    ],
+)
+def test_LLM이_꾸며_돌려준_자리표시자를_하나의_표기로_맞춘다(value, expected):
+    assert normalize_mark(value) == expected

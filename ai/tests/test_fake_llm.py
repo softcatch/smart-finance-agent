@@ -52,6 +52,10 @@ def test_지연_표본이_빠진_호출_종류가_있으면_만들지_못한다(
             "123456789012로 5000원 보내줘",
             {"is_transfer": True, "amount": 5000, "recipient_account_number": "123456789012"},
         ),
+        (
+            "[계좌1]로 5000원 보내줘",  # 앱이 계좌번호를 가려서 보낸 모양(NFR-055)
+            {"is_transfer": True, "amount": 5000, "recipient_account_number": "[계좌1]"},
+        ),
         ("지난달 송금 내역 알려줘", {"is_history": True, "period": "last_month"}),
         ("삼성전자 영업이익 알려줘", {"is_financial": True, "companies": ["삼성전자"]}),
         (
@@ -194,15 +198,17 @@ def _rows():
 
 def test_앱의_LLM_호출_경로가_가짜_LLM으로_끝까지_돈다(fake_llm_url):
     graph = build_graph(make_llm())  # 코드 변경 없이 환경변수만 바꿨다
+    created = []
+
+    def create_transfer(pending):
+        created.append(pending)
+        return {"recipientName": "김영희", "amount": pending["amount"]}
 
     def ask(message: str, thread: str):
         config = {
             "configurable": {
                 "thread_id": thread,
-                "create_transfer": lambda pending: {
-                    "recipientName": "김영희",
-                    "amount": pending["amount"],
-                },
+                "create_transfer": create_transfer,
                 "compare_financials": lambda names: (
                     [("005930", "삼성전자")],
                     [],
@@ -226,6 +232,8 @@ def test_앱의_LLM_호출_경로가_가짜_LLM으로_끝까지_돈다(fake_llm_
     assert business["reply"].startswith(ANSWERS["business"]) and business["guard"] == "PASS"
     assert financial["table"]["columns"] == ["항목", "삼성전자"]
     assert transfer["reply"].startswith("김영희님께 5,000원")
+    # 가짜 LLM은 앱이 가려 보낸 [계좌1]을 뽑았고, 송금 요청 직전에 원래 번호로 되돌아왔다(NFR-055)
+    assert created == [{"amount": 5000, "recipient_account_number": "123456789012"}]
 
 
 def test_상세_보고서와_임베딩도_가짜_LLM으로_돈다(fake_llm_url):

@@ -144,7 +144,8 @@ def extract_slots(message: str) -> dict:
         slots["is_history"] = True
         slots["period"] = next((v for k, v in PERIODS.items() if k in message), None)
     elif "보내" in message or "송금" in message:
-        account = re.search(r"\d{10,14}", message)
+        # 앱이 계좌번호를 가려서 보낸 표기([계좌1])도 계좌로 본다(NFR-055)
+        account = re.search(r"\[계좌\d+\]|\d{10,14}", message)
         alias = re.search(r"(\S+?)(?:에게|한테)", message)
         slots["is_transfer"] = True
         slots["amount"] = _amount(message)

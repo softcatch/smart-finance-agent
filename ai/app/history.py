@@ -1,6 +1,8 @@
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
+from app.guard import NAME_MARK
+
 Period = Literal["today", "this_month", "last_month", "last_7_days"]
 
 # 한국은 서머타임이 없어 고정 오프셋이면 된다(tz 데이터베이스가 필요 없다).
@@ -35,7 +37,10 @@ def _md(d: date) -> str:
 
 
 # 숫자는 Spring 응답 값을 그대로 쓴다(NFR-002). 문장은 코드 템플릿이라 LLM 호출이 없다.
-def history_reply(period: Period, start: date, end: date, summary: dict) -> str:
+# hide_names: 상대방 실명을 NAME_MARK로 바꾼다 — 화면에는 실명을 보이고 대화 기록에는 이쪽을 남긴다(NFR-055).
+def history_reply(
+    period: Period, start: date, end: date, summary: dict, hide_names: bool = False
+) -> str:
     span = _md(start) if start == end else f"{_md(start)}~{_md(end)}"
     head = f"{LABELS[period]}({span})"
     if summary["count"] == 0:
@@ -47,7 +52,8 @@ def history_reply(period: Period, start: date, end: date, summary: dict) -> str:
     ]
     for item in summary["items"]:
         day = datetime.fromisoformat(item["createdAt"]).astimezone(KST).date()
-        who, amount = item["counterpartName"], f"{item['amount']:,}원"
+        who = NAME_MARK if hide_names else item["counterpartName"]
+        amount = f"{item['amount']:,}원"
         if item["direction"] == "SENT":
             lines.append(f"- {_md(day)} {who}에게 {amount} 보냄")
         else:
