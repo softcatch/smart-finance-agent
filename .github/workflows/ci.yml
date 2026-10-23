@@ -35,3 +35,10 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run pytest -q
+
+  # 입구(nginx, NFR-053): 자체 서명 인증서와 가짜 upstream으로 설정의 동작을 확인한다(Let's Encrypt는 제외).
+  proxy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: nginx/test.sh

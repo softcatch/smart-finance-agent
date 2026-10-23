@@ -27,8 +27,9 @@ services:
       SMART_JWT_SECRET: ${SMART_JWT_SECRET}
       SMART_AI_BASE_URL: http://ai:8000
       SMART_ADMIN_LOGIN_IDS: ${SMART_ADMIN_LOGIN_IDS:-}
+    # 밖에서는 nginx(아래 proxy 프로필)로만 들어온다. 서버 헬스체크와 로컬 개발·부하 측정은 이 주소를 그대로 쓴다.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       db:
         condition: service_healthy
@@ -70,5 +71,61 @@ services:
       db:
         condition: service_healthy
 
+  # 유일한 입구(NFR-053): TLS를 끝내고 Spring으로 넘긴다. 프로필 proxy를 켰을 때만 뜬다 — 로컬 개발과
+  # 부하 측정(smart-loadtest)은 지금처럼 Spring을 직접 친다. 서버는 `docker compose --profile proxy up -d`로 올린다.
+  # 첫 기동은 자체 서명 인증서로 켜지고, certbot이 Let's Encrypt 인증서를 /certs에 채우면 nginx가 바뀐 것을 보고 다시 읽는다.
+  nginx:
+    profiles: [proxy]
+    build: ./nginx
+    # 배포 서버는 Docker Hub에서 받은 이미지를 이 이름으로 태그해 쓴다(.github/workflows/deploy.yml).
+    image: smart-finance-agent-proxy
+    environment:
+      DOMAIN: ${DOMAIN:-} # 서버 .env에 꼭 넣는다(비어 있으면 nginx가 시작하지 못한다)
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - certs:/certs
+      - acme-webroot:/var/www/certbot
+
+  # 인증서 발급·갱신(Let's Encrypt, HTTP-01). 80번 포트로 도메인을 확인하므로 DNS와 공유기 포워딩이 먼저 돼 있어야 한다.
+  # LETSENCRYPT_STAGING=1이면 시험용(스테이징) 서버를 쓴다 — 발급 한도에 걸리지 않고, 브라우저는 신뢰하지 않는다.
+  certbot:
+    profiles: [proxy]
+    image: certbot/certbot
+    environment:
+      DOMAIN: ${DOMAIN:-}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-} # 서버 .env에 꼭 넣는다(만료 안내를 받을 주소)
+      LETSENCRYPT_STAGING: ${LETSENCRYPT_STAGING:-}
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certs:/certs
+      - acme-webroot:/var/www/certbot
+    depends_on:
+      - nginx
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        # 시험용과 진짜는 인증서 이름을 달리해서, 스테이징에서 진짜로 바꿔도 따로 지울 것이 없다.
+        NAME="$$DOMAIN$${LETSENCRYPT_STAGING:+-staging}"
+        sleep 5 # nginx가 켜질 시간
+        while true; do
+          certbot certonly --webroot -w /var/www/certbot --cert-name "$$NAME" -d "$$DOMAIN" -m "$$LETSENCRYPT_EMAIL" \
+            --agree-tos --non-interactive --keep-until-expiring $${LETSENCRYPT_STAGING:+--staging} \
+            || echo "인증서 발급·갱신에 실패했다. 다시 시도한다"
+          LIVE="/etc/letsencrypt/live/$$NAME"
+          if [ -s "$$LIVE/fullchain.pem" ]; then
+            # nginx가 보는 파일은 키를 먼저, 인증서를 나중에 바꾼다(인증서가 바뀐 것을 보고 다시 읽기 때문이다)
+            cp -L "$$LIVE/privkey.pem" /certs/privkey.pem && cp -L "$$LIVE/fullchain.pem" /certs/fullchain.pem
+            sleep 43200 # 12시간마다 갱신 여부를 본다(만료 30일 전부터 갱신한다)
+          else
+            sleep 600 # 아직 못 받았다. 도메인 확인 실패가 한도(시간당 5회)에 걸리지 않게 10분 간격으로 다시 시도한다
+          fi
+        done
+
 volumes:
   db-data:
+  certs:
+  letsencrypt:
+  acme-webroot:
