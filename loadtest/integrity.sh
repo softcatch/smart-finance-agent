@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 정합성 테스트(NFR-034). 사용: [ROUNDS=100 PARALLEL=10] loadtest/integrity.sh [MODE=main]
 # db·server를 새로 띄우고 시드한 뒤, 송금 확정에 동시 요청 두 가지(같은 요청ID 연타, 같은 계좌 동시 출금)를 건다.
-# 끝나면 SQL 3개로 판정한다: 전체 잔액 합계 불변 / 중복 확정 0 / 음수 잔액 0. 위반이 있으면 종료 코드 1.
+# 끝나면 SQL로 판정한다: 전체 잔액 합계 불변 / 중복 확정 0 / 음수 잔액 0 / 알림 행 수 = 확정 송금 × 2(FR-024). 위반이 있으면 종료 코드 1.
 # MODE: main(현재 구현, 원자적 UPDATE) | none(잠금 없음, 기준선) | lock(FOR UPDATE) | version(@Version). main 외에는 변형 패치가 필요하다.
 #   none·lock: git apply loadtest/variants/transfer-confirm.patch
 #   version:   위 패치 + git apply loadtest/variants/transfer-confirm-version.patch
@@ -56,8 +56,10 @@ SELECT json_build_object(
   'mode', '$MODE',
   'sum_diff', (SELECT sum(balance) FROM account) - $SUM_BEFORE,
   'duplicates', (SELECT count(*) FROM transfer WHERE id > $LAST_TRANSFER) - (SELECT count(*) FROM transfer_request WHERE used),
-  'negative', (SELECT count(*) FROM account WHERE balance < 0));
+  'negative', (SELECT count(*) FROM account WHERE balance < 0),
+  'notification_diff', (SELECT count(*) FROM transfer WHERE id > $LAST_TRANSFER) * 2
+                       - (SELECT count(*) FROM notification WHERE transfer_id > $LAST_TRANSFER));
 SQL
 python3 ai/loadtest/report.py integrity "$OUT" | tee "$OUT/report.md"
 echo "결과: $OUT"
-python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); sys.exit(any(c[k] for k in ("sum_diff","duplicates","negative")))' "$OUT/checks.json"
+python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); sys.exit(any(c[k] for k in ("sum_diff","duplicates","negative","notification_diff")))' "$OUT/checks.json"
