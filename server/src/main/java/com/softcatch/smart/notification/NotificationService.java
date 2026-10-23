@@ -1,11 +1,17 @@
 package com.softcatch.smart.notification;
 
+import com.softcatch.smart.notification.dto.response.NotificationItem;
+import com.softcatch.smart.notification.dto.response.NotificationListResponse;
+import java.util.List;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class NotificationService {
+
+  private static final int DEFAULT_PAGE_SIZE = 20;
 
   private final NotificationRepository notifications;
 
@@ -29,5 +35,17 @@ public class NotificationService {
       notifications.save(
           new Notification(recipientMemberId, transferId, Direction.RECEIVED, senderName, amount));
     }
+  }
+
+  NotificationListResponse list(Long memberId, Long cursor, Integer size) {
+    int pageSize = size != null ? size : DEFAULT_PAGE_SIZE;
+    // size보다 하나 더 가져와서, 남는 게 있으면 hasNext=true로 판단한다.
+    List<Notification> rows =
+        notifications.findPage(memberId, cursor, Pageable.ofSize(pageSize + 1));
+    boolean hasNext = rows.size() > pageSize;
+    List<NotificationItem> items =
+        (hasNext ? rows.subList(0, pageSize) : rows).stream().map(NotificationItem::of).toList();
+    Long nextCursor = hasNext ? items.get(items.size() - 1).notificationId() : null;
+    return new NotificationListResponse(items, nextCursor, hasNext);
   }
 }

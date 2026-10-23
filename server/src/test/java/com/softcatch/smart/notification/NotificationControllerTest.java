@@ -20,8 +20,10 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 @Import(TestcontainersConfiguration.class)
@@ -150,6 +152,116 @@ class NotificationControllerTest {
     Assertions.assertEquals(1, rows.size());
     Assertions.assertEquals("SENT", rows.get(0).get("direction"));
     Assertions.assertEquals("혼자", rows.get(0).get("counterpart_name"));
+  }
+
+  @Test
+  void 목록은_본인_알림만_최신순으로_준다() throws Exception {
+    MemberSession a = signupAndLogin("nt" + System.nanoTime(), "목록A");
+    AccountInfo accountA = openAccount(a.token());
+    charge(a.token(), accountA.accountId(), 100_000L);
+    MemberSession b = signupAndLogin("nt" + System.nanoTime(), "목록B");
+    AccountInfo accountB = openAccount(b.token());
+    charge(b.token(), accountB.accountId(), 100_000L);
+    MemberSession c = signupAndLogin("nt" + System.nanoTime(), "목록C");
+    AccountInfo accountC = openAccount(c.token());
+    long first = confirmTransfer(a.token(), accountB.accountNumber(), 1_000L);
+    long second = confirmTransfer(a.token(), accountB.accountNumber(), 2_000L);
+    long third = confirmTransfer(b.token(), accountC.accountNumber(), 3_000L);
+
+    list(b.token(), null, null)
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items.length()").value(3))
+        // B의 알림: 방금 C에게 보낸 것(SENT), 그 전에 A에게서 받은 둘(RECEIVED) — 최신순
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[0].direction").value("SENT"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[0].transferId").value(third))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[0].counterpartName").value("목록C"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[0].amount").value(3000))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[0].createdAt").isNotEmpty())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[1].direction").value("RECEIVED"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[1].transferId").value(second))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[1].counterpartName").value("목록A"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[2].transferId").value(first))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.hasNext").value(false))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.nextCursor").doesNotExist());
+    // A는 자기 것(보낸 둘)만 본다
+    list(a.token(), null, null)
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items.length()").value(2))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items[0].direction").value("SENT"));
+  }
+
+  @Test
+  void 커서와_size로_이어_받는다() throws Exception {
+    MemberSession sender = signupAndLogin("nt" + System.nanoTime(), "페이지보낸이");
+    AccountInfo from = openAccount(sender.token());
+    charge(sender.token(), from.accountId(), 100_000L);
+    AccountInfo to = openAccount(signupAndLogin("nt" + System.nanoTime(), "페이지받는이").token());
+    for (int i = 0; i < 5; i++) {
+      confirmTransfer(sender.token(), to.accountNumber(), 1_000L);
+    }
+
+    JsonNode page1 = body(list(sender.token(), null, 2)).at("/data");
+    Assertions.assertEquals(2, page1.at("/items").size());
+    Assertions.assertTrue(page1.at("/hasNext").asBoolean());
+    long cursor = page1.at("/nextCursor").asLong();
+    Assertions.assertEquals(page1.at("/items/1/notificationId").asLong(), cursor); // 마지막 알림 ID
+
+    JsonNode page2 = body(list(sender.token(), cursor, 2)).at("/data");
+    Assertions.assertEquals(2, page2.at("/items").size());
+    Assertions.assertTrue(page2.at("/items/0/notificationId").asLong() < cursor);
+    Assertions.assertTrue(page2.at("/hasNext").asBoolean());
+
+    JsonNode page3 = body(list(sender.token(), page2.at("/nextCursor").asLong(), 2)).at("/data");
+    Assertions.assertEquals(1, page3.at("/items").size());
+    Assertions.assertFalse(page3.at("/hasNext").asBoolean());
+    Assertions.assertTrue(
+        page3.at("/nextCursor").isNull() || page3.at("/nextCursor").isMissingNode());
+
+    // 딱 size건만 있으면 다음 묶음은 없다
+    JsonNode exact = body(list(sender.token(), null, 5)).at("/data");
+    Assertions.assertEquals(5, exact.at("/items").size());
+    Assertions.assertFalse(exact.at("/hasNext").asBoolean());
+
+    // size를 안 주면 20개씩이라 5건이 한 번에 온다
+    Assertions.assertEquals(5, body(list(sender.token(), null, null)).at("/data/items").size());
+  }
+
+  @Test
+  void 알림이_없으면_빈_목록이다() throws Exception {
+    MemberSession member = signupAndLogin("nt" + System.nanoTime(), "알림없음");
+
+    list(member.token(), null, null)
+        .andExpect(MockMvcResultMatchers.status().isOk())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.items.length()").value(0))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.hasNext").value(false));
+  }
+
+  @Test
+  void 목록은_인증_없으면_401이다() throws Exception {
+    mockMvc
+        .perform(MockMvcRequestBuilders.get("/api/v1/notifications"))
+        .andExpect(MockMvcResultMatchers.status().isUnauthorized());
+  }
+
+  private ResultActions list(String token, Long cursor, Integer size) throws Exception {
+    MockHttpServletRequestBuilder request =
+        MockMvcRequestBuilders.get("/api/v1/notifications")
+            .header("Authorization", "Bearer " + token);
+    if (cursor != null) {
+      request = request.param("cursor", cursor.toString());
+    }
+    if (size != null) {
+      request = request.param("size", size.toString());
+    }
+    return mockMvc.perform(request);
+  }
+
+  private JsonNode body(ResultActions result) throws Exception {
+    return json.readTree(
+        result
+            .andExpect(MockMvcResultMatchers.status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString());
   }
 
   private int countFor(Long memberId) {
