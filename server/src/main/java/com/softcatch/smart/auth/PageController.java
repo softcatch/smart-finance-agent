@@ -41,4 +41,10 @@ class PageController {
   String aliasesPage() {
     return "aliases";
   }
+
+  // AI 사용량 관리(FR-031). 메뉴에는 없고 주소로 들어간다. 화면은 누구나 열 수 있고, 관리자가 아니면 데이터 API가 403으로 막는다.
+  @GetMapping("/admin/ai-usage")
+  String adminAiUsagePage() {
+    return "admin-ai-usage";
+  }
 }
