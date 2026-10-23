@@ -5,6 +5,7 @@ import static com.microsoft.playwright.assertions.PlaywrightAssertions.assertTha
 import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.Page;
 import com.softcatch.smart.TestcontainersConfiguration;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -122,6 +123,29 @@ class NotificationE2ETest extends E2ETestBase {
 
     waitForStream(page); // 잠시 뒤 다시 열린다
     assertThat(page.locator("#bell")).hasText("알림 (1)");
+  }
+
+  @Test
+  void 만료된_토큰이_남아_있어도_로그인_화면은_토큰을_지우고_로그인할_수_있다() {
+    String loginId = "exp" + System.nanoTime();
+    post(
+        "/api/v1/auth/signup",
+        null,
+        Map.of("loginId", loginId, "password", "pw12345!", "name", "만료"));
+    page.navigate(url("/signup")); // 알림 스크립트가 없는 화면에서 만료된 토큰을 심는다
+    page.evaluate("localStorage.setItem('accessToken', 'expired.token.value')");
+
+    page.navigate(url("/login")); // 로그인 화면도 공통 스크립트를 쓴다
+
+    // 스트림이 401이면 토큰을 지운다. 안 지우면 같은 토큰으로 스트림 401 → 로그인 화면 이동이 되풀이된다
+    page.waitForFunction(
+        "localStorage.getItem('accessToken') === null",
+        null,
+        new Page.WaitForFunctionOptions().setTimeout(5_000));
+    page.locator("input[name=loginId]").fill(loginId);
+    page.locator("input[name=password]").fill("pw12345!");
+    page.locator("#login-form button").click();
+    assertThat(page.locator("#msg")).hasText("로그인 성공");
   }
 
   @Test

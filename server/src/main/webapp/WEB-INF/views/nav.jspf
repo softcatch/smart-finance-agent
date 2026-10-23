@@ -114,6 +114,8 @@
   async function openStream() {
     const res = await fetch('/api/v1/notifications/stream', { headers: { ...headers, 'Accept': 'text/event-stream' } });
     if (res.status === 401) {
+      // 만료·위조된 토큰은 지우고 보낸다. 남겨 두면 로그인 화면(이 조각을 함께 쓴다)이 같은 토큰으로 다시 401 → 이동을 되풀이한다.
+      localStorage.removeItem('accessToken');
       location.href = '/login';
       return;
     }
