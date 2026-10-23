@@ -37,6 +37,10 @@ public class Member {
     return id;
   }
 
+  public String getLoginId() {
+    return loginId;
+  }
+
   String getPasswordHash() {
     return passwordHash;
   }
