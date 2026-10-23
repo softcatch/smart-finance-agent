@@ -3,6 +3,7 @@ package com.softcatch.smart.notification;
 import com.softcatch.smart.notification.dto.response.NotificationItem;
 import com.softcatch.smart.notification.dto.response.NotificationListResponse;
 import java.util.List;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -14,9 +15,11 @@ public class NotificationService {
   private static final int DEFAULT_PAGE_SIZE = 20;
 
   private final NotificationRepository notifications;
+  private final ApplicationEventPublisher events;
 
-  NotificationService(NotificationRepository notifications) {
+  NotificationService(NotificationRepository notifications, ApplicationEventPublisher events) {
     this.notifications = notifications;
+    this.events = events;
   }
 
   // 송금 확정 트랜잭션 안에서 부른다 — 알림이 송금과 함께 커밋되거나 함께 사라진다(FR-024).
@@ -35,6 +38,7 @@ public class NotificationService {
       notifications.save(
           new Notification(recipientMemberId, transferId, Direction.RECEIVED, senderName, amount));
     }
+    events.publishEvent(new NotificationsSaved(transferId)); // 커밋된 뒤에 접속 중인 사람에게 보낸다
   }
 
   NotificationListResponse list(Long memberId, Long cursor, Integer size) {

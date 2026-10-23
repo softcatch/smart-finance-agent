@@ -5,11 +5,19 @@ import com.softcatch.smart.account.dto.request.ChargeRequest;
 import com.softcatch.smart.account.dto.request.OpenAccountRequest;
 import com.softcatch.smart.auth.dto.request.LoginRequest;
 import com.softcatch.smart.auth.dto.request.SignupRequest;
+import com.softcatch.smart.notification.dto.response.NotificationItem;
 import com.softcatch.smart.transfer.dto.request.TransferConfirmRequest;
 import com.softcatch.smart.transfer.dto.request.TransferCreateRequest;
+import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,10 +27,12 @@ import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -39,6 +49,7 @@ class NotificationControllerTest {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private NotificationHub hub;
   private final ObjectMapper json = new ObjectMapper();
 
   @Test
@@ -262,6 +273,173 @@ class NotificationControllerTest {
             .andReturn()
             .getResponse()
             .getContentAsString());
+  }
+
+  @Test
+  void 연결하면_바로_응답이_시작되고_연결_목록에_들어간다() throws Exception {
+    MemberSession member = signupAndLogin("nt" + System.nanoTime(), "연결");
+
+    MvcResult stream = openStream(member.token());
+
+    Assertions.assertEquals(200, stream.getResponse().getStatus());
+    Assertions.assertTrue(
+        stream.getResponse().getContentType().startsWith("text/event-stream"),
+        stream.getResponse().getContentType());
+    Assertions.assertTrue(content(stream).contains(": connected"), content(stream));
+    Assertions.assertEquals(1, hub.connectionCount(member.memberId()));
+  }
+
+  @Test
+  void 접속_중인_보낸_사람과_받은_사람에게_확정_직후_알림이_가고_남에게는_안_간다() throws Exception {
+    MemberSession sender = signupAndLogin("nt" + System.nanoTime(), "전달보낸이");
+    AccountInfo from = openAccount(sender.token());
+    charge(sender.token(), from.accountId(), 50_000L);
+    MemberSession recipient = signupAndLogin("nt" + System.nanoTime(), "전달받는이");
+    AccountInfo to = openAccount(recipient.token());
+    MemberSession bystander = signupAndLogin("nt" + System.nanoTime(), "구경꾼");
+    MvcResult senderStream = openStream(sender.token());
+    MvcResult recipientStream = openStream(recipient.token());
+    MvcResult bystanderStream = openStream(bystander.token());
+
+    long transferId = confirmTransfer(sender.token(), to.accountNumber(), 10_000L);
+
+    awaitTrue(() -> content(recipientStream).contains("event:notification"));
+    awaitTrue(() -> content(senderStream).contains("event:notification"));
+    String received = content(recipientStream);
+    Assertions.assertTrue(received.contains("\"direction\":\"RECEIVED\""), received);
+    Assertions.assertTrue(received.contains("\"counterpartName\":\"전달보낸이\""), received);
+    Assertions.assertTrue(received.contains("\"amount\":10000"), received);
+    Assertions.assertTrue(received.contains("\"transferId\":" + transferId), received);
+    Assertions.assertTrue(received.contains("\"notificationId\":"), received);
+    String sent = content(senderStream);
+    Assertions.assertTrue(sent.contains("\"direction\":\"SENT\""), sent);
+    Assertions.assertTrue(sent.contains("\"counterpartName\":\"전달받는이\""), sent);
+    Assertions.assertFalse(content(bystanderStream).contains("event:notification")); // 남의 알림은 안 온다
+  }
+
+  @Test
+  void 스트림으로_온_알림은_목록의_한_건과_같다() throws Exception {
+    MemberSession sender = signupAndLogin("nt" + System.nanoTime(), "같은모양보낸이");
+    AccountInfo from = openAccount(sender.token());
+    charge(sender.token(), from.accountId(), 50_000L);
+    MemberSession recipient = signupAndLogin("nt" + System.nanoTime(), "같은모양받는이");
+    AccountInfo to = openAccount(recipient.token());
+    MvcResult stream = openStream(recipient.token());
+
+    confirmTransfer(sender.token(), to.accountNumber(), 7_000L);
+    awaitTrue(() -> content(stream).contains("event:notification"));
+
+    String data = content(stream).split("data:", 2)[1].split("\n")[0];
+    JsonNode pushed = json.readTree(data);
+    JsonNode listed = body(list(recipient.token(), null, null)).at("/data/items/0");
+    Assertions.assertEquals(listed, pushed);
+  }
+
+  @Test
+  void 확정_응답은_전달을_기다리지_않는다() throws Exception {
+    MemberSession sender = signupAndLogin("nt" + System.nanoTime(), "대기보낸이");
+    AccountInfo from = openAccount(sender.token());
+    charge(sender.token(), from.accountId(), 50_000L);
+    MemberSession recipient = signupAndLogin("nt" + System.nanoTime(), "대기받는이");
+    AccountInfo to = openAccount(recipient.token());
+    GatedEmitter slow = new GatedEmitter(); // 보내는 데 오래 걸리는(막힌) 연결
+    hub.register(recipient.memberId(), slow);
+
+    // 전달이 막혀 있어도 확정은 200으로 끝난다
+    long transferId = confirmTransfer(sender.token(), to.accountNumber(), 3_000L);
+
+    Assertions.assertTrue(slow.received.isEmpty());
+    slow.gate.countDown();
+    awaitTrue(() -> !slow.received.isEmpty());
+    Assertions.assertEquals(transferId, slow.received.get(0).transferId());
+    Assertions.assertEquals("RECEIVED", slow.received.get(0).direction());
+  }
+
+  @Test
+  void 하트비트는_ping_주석_줄이다() throws Exception {
+    MemberSession member = signupAndLogin("nt" + System.nanoTime(), "하트비트");
+    MvcResult stream = openStream(member.token());
+
+    hub.ping();
+
+    awaitTrue(() -> content(stream).contains(": ping"));
+  }
+
+  @Test
+  void 보내다_실패한_연결은_연결_목록에서_빠진다() throws Exception {
+    MemberSession member = signupAndLogin("nt" + System.nanoTime(), "끊김");
+    hub.register(member.memberId(), new BrokenEmitter());
+    Assertions.assertEquals(1, hub.connectionCount(member.memberId()));
+
+    hub.ping();
+
+    Assertions.assertEquals(0, hub.connectionCount(member.memberId()));
+  }
+
+  @Test
+  void 스트림은_인증_없으면_401이다() throws Exception {
+    mockMvc
+        .perform(
+            MockMvcRequestBuilders.get("/api/v1/notifications/stream")
+                .accept(MediaType.TEXT_EVENT_STREAM))
+        .andExpect(MockMvcResultMatchers.status().isUnauthorized())
+        .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("AUTH_INVALID"));
+  }
+
+  // 막혀 있다가 gate가 열리면 보내는 연결(느린 클라이언트)
+  private static class GatedEmitter extends SseEmitter {
+    final CountDownLatch gate = new CountDownLatch(1);
+    final List<NotificationItem> received = new CopyOnWriteArrayList<>();
+
+    @Override
+    public void send(SseEventBuilder builder) throws IOException {
+      try {
+        gate.await(5, TimeUnit.SECONDS);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
+      builder.build().stream()
+          .map(entry -> entry.getData())
+          .filter(NotificationItem.class::isInstance)
+          .forEach(item -> received.add((NotificationItem) item));
+    }
+  }
+
+  // 끊긴 연결: 보내면 항상 실패한다
+  private static class BrokenEmitter extends SseEmitter {
+    @Override
+    public void send(SseEventBuilder builder) throws IOException {
+      throw new IOException("연결이 끊겼다");
+    }
+  }
+
+  private MvcResult openStream(String token) throws Exception {
+    return mockMvc
+        .perform(
+            MockMvcRequestBuilders.get("/api/v1/notifications/stream")
+                .header("Authorization", "Bearer " + token)
+                .accept(MediaType.TEXT_EVENT_STREAM))
+        .andExpect(MockMvcResultMatchers.request().asyncStarted())
+        .andReturn();
+  }
+
+  private static String content(MvcResult stream) {
+    try {
+      return stream.getResponse().getContentAsString(StandardCharsets.UTF_8);
+    } catch (UnsupportedEncodingException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  // 전달은 다른 스레드에서 하므로 잠깐 기다리며 확인한다.
+  private static void awaitTrue(BooleanSupplier condition) throws InterruptedException {
+    long deadline = System.currentTimeMillis() + 5_000;
+    while (!condition.getAsBoolean()) {
+      if (System.currentTimeMillis() > deadline) {
+        Assertions.fail("5초 안에 조건이 맞지 않았다");
+      }
+      Thread.sleep(20);
+    }
   }
 
   private int countFor(Long memberId) {

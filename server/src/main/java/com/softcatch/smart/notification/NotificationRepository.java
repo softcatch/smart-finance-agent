@@ -12,4 +12,7 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
       "SELECT n FROM Notification n WHERE n.memberId = :memberId "
           + "AND (:cursor IS NULL OR n.id < :cursor) ORDER BY n.id DESC")
   List<Notification> findPage(Long memberId, Long cursor, Pageable pageable);
+
+  // 송금 하나의 알림(보낸 사람·받은 사람). 커밋 뒤 전달에 쓴다.
+  List<Notification> findByTransferId(Long transferId);
 }
