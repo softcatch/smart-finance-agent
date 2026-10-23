@@ -62,7 +62,7 @@ ed25519 파일이 없으면 같은 폴더의 `ssh_host_ecdsa_key.pub`·`ssh_host
 ### 2. 서버 준비(한 번)
 
 - Docker와 Compose v2(`docker compose version`), 위 계정의 docker 그룹 소속, 공유기의 2222 포트 포워딩
-- `~/smart-finance-agent/.env`를 서버에서 직접 만든다. `.env.example`을 바탕으로 DB 비밀번호·JWT 시크릿을 바꾸고 `DART_API_KEY`·`OPENAI_API_KEY`를 채운다. OpenAI 장애 때 Claude로 대체하려면 `ANTHROPIC_API_KEY`도 채운다(비우면 대체 없이 OpenAI만 쓴다). 비밀값이라 레포·GitHub에 두지 않는다.
+- `~/smart-finance-agent/.env`를 서버에서 직접 만든다. `.env.example`을 바탕으로 DB 비밀번호·JWT 시크릿을 바꾸고 `DART_API_KEY`·`OPENAI_API_KEY`를 채운다. OpenAI 장애 때 Claude로 대체하려면 `ANTHROPIC_API_KEY`도 채운다(비우면 대체 없이 OpenAI만 쓴다). 관리자 화면(`/admin/ai-usage`)을 쓰려면 `SMART_ADMIN_LOGIN_IDS`에 관리자로 쓸 아이디를 적고 그 아이디로 가입한다(이미 가입한 회원은 DB에서 `UPDATE member SET role = 'ADMIN' WHERE login_id = '…'`). 비밀값이라 레포·GitHub에 두지 않는다.
 - `compose.yaml`은 배포 때마다 워크플로우가 서버로 복사한다.
 - Docker Hub 저장소가 private이면 서버에서 `docker login`을 한 번 해 둔다.
 
