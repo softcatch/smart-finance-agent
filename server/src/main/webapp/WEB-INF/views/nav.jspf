@@ -6,8 +6,10 @@
     <a href="/transfers">송금 내역</a>
     <a href="/aliases">별칭</a>
   </nav>
+  <button id="bell" type="button" hidden>알림</button>
   <button id="logout" type="button" hidden>로그아웃</button>
 </header>
+<ul id="bell-list" hidden></ul>
 <script>
 // 화면 스크립트와 이름이 겹치지 않게 함수로 감싼다.
 (() => {
@@ -24,5 +26,124 @@
     sessionStorage.removeItem('chat');
     location.href = '/login';
   });
+
+  // 송금 완료 알림(FR-024): 스트림으로 새 알림을 받고, 연결이 열릴 때마다 목록(E-14)으로 빈 곳을 채운다.
+  // 읽음은 서버에 두지 않고 화면이 마지막으로 본 알림 ID(localStorage, 회원별)로 표시한다.
+  const token = localStorage.getItem('accessToken');
+  if (!token) return;
+  let memberId = '';
+  try {
+    memberId = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).sub;
+  } catch (e) { /* 토큰을 못 읽으면 회원 구분 없이 하나로 쓴다 */ }
+  const seenKey = 'lastSeenNotification:' + memberId;
+  const bell = document.getElementById('bell');
+  const panel = document.getElementById('bell-list');
+  const items = new Map(); // 알림 ID → 알림. 스트림과 목록에서 같은 알림이 와도 한 번만 센다
+  bell.hidden = false;
+
+  const lastSeen = () => Number(localStorage.getItem(seenKey) || 0);
+  const newestId = () => Math.max(0, ...items.keys());
+
+  function sentence(n) {
+    const amount = n.amount.toLocaleString('ko-KR') + '원';
+    return n.direction === 'SENT'
+      ? n.counterpartName + '님께 ' + amount + '을 보냈습니다'
+      : n.counterpartName + '님이 ' + amount + '을 보냈습니다';
+  }
+
+  function render() {
+    const sorted = [...items.values()].sort((a, b) => b.notificationId - a.notificationId);
+    const unread = sorted.filter((n) => n.notificationId > lastSeen()).length;
+    bell.textContent = unread ? '알림 (' + unread + ')' : '알림';
+    panel.replaceChildren(...sorted.map((n) => {
+      const li = document.createElement('li');
+      li.textContent = sentence(n) + ' · ' + new Date(n.createdAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+      if (n.notificationId > lastSeen()) li.className = 'new';
+      return li;
+    }));
+    if (!sorted.length) {
+      const li = document.createElement('li');
+      li.textContent = '알림이 없습니다.';
+      panel.appendChild(li);
+    }
+  }
+
+  // 목록을 열어 둔 채 도착한 알림은 바로 읽은 것으로 친다.
+  function markSeen() {
+    localStorage.setItem(seenKey, String(newestId()));
+    bell.textContent = '알림';
+  }
+
+  function add(n) {
+    items.set(n.notificationId, n);
+    render();
+    if (!panel.hidden) markSeen();
+  }
+
+  bell.addEventListener('click', () => {
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden) {
+      render(); // 안 읽은 알림을 굵게 보여 주고
+      markSeen(); // 열었으니 읽은 것으로 한다
+    }
+  });
+  // 다른 탭에서 읽음 표시를 바꾸면 이 탭도 따라간다.
+  addEventListener('storage', (e) => { if (e.key === seenKey) render(); });
+
+  const headers = { 'Authorization': 'Bearer ' + token };
+
+  async function loadList() {
+    const res = await fetch('/api/v1/notifications', { headers });
+    const body = res.ok ? await res.json() : null;
+    if (body && body.success) body.data.items.forEach((n) => items.set(n.notificationId, n));
+    render();
+  }
+
+  // 스트림 한 덩어리("event: …\ndata: …")를 읽는다. ": ping" 같은 주석 줄은 건너뛴다.
+  function handle(block) {
+    let event = '';
+    let data = '';
+    block.split('\n').forEach((line) => {
+      if (line.startsWith('event:')) event = line.slice(6).trim();
+      else if (line.startsWith('data:')) data += line.slice(5).trim();
+    });
+    if (event === 'notification' && data) add(JSON.parse(data));
+  }
+
+  // EventSource는 Authorization 헤더를 못 붙여서 fetch로 스트림을 읽는다(토큰을 URL에 넣지 않는다).
+  async function openStream() {
+    const res = await fetch('/api/v1/notifications/stream', { headers: { ...headers, 'Accept': 'text/event-stream' } });
+    if (res.status === 401) {
+      // 만료·위조된 토큰은 지우고 보낸다. 남겨 두면 로그인 화면(이 조각을 함께 쓴다)이 같은 토큰으로 다시 401 → 이동을 되풀이한다.
+      localStorage.removeItem('accessToken');
+      location.href = '/login';
+      return;
+    }
+    if (!res.ok) throw new Error('stream ' + res.status);
+    await loadList(); // 연결이 열린 뒤에 목록을 받아 연결 전에 확정된 알림을 채운다(겹치는 것은 ID로 걸러진다)
+    document.documentElement.dataset.notifications = 'open';
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let end;
+      while ((end = buffer.indexOf('\n\n')) >= 0) {
+        handle(buffer.slice(0, end));
+        buffer = buffer.slice(end + 2);
+      }
+    }
+  }
+
+  // 끊기거나 열지 못하면 잠시 뒤 다시 연다. 다시 열 때마다 목록으로 빈 곳을 채운다.
+  (async () => {
+    for (;;) {
+      try { await openStream(); } catch (e) { /* 다시 시도한다 */ }
+      delete document.documentElement.dataset.notifications;
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+    }
+  })();
 })();
 </script>

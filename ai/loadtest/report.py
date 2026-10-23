@@ -192,11 +192,15 @@ def integrity_report(folder: Path) -> str:
             f"{n['confirm_error']} | {rate:.1f} | {ms(p95)} |"
         )
     violations = {k: checks[k] for k in ("sum_diff", "duplicates", "negative")}
-    lines += [
-        "",
-        f"전체 잔액 합계 차이 {violations['sum_diff']:+,}원, 중복 확정 {violations['duplicates']}건, 음수 잔액 {violations['negative']}개 — "
-        + ("위반 있음" if any(violations.values()) else "위반 없음"),
-    ]
+    summary = (
+        f"전체 잔액 합계 차이 {violations['sum_diff']:+,}원, 중복 확정 {violations['duplicates']}건, "
+        f"음수 잔액 {violations['negative']}개"
+    )
+    # 알림(FR-024)이 있는 코드에서만 잰다: 확정 송금 × 2 − 알림 행 수
+    if "notification_diff" in checks:
+        violations["notification_diff"] = checks["notification_diff"]
+        summary += f", 알림 행 수 차이 {checks['notification_diff']}건"
+    lines += ["", summary + " — " + ("위반 있음" if any(violations.values()) else "위반 없음")]
     return "\n".join(lines)
 
 

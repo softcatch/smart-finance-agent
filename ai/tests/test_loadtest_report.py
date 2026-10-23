@@ -177,6 +177,28 @@ def test_정합성_보고서는_성공_수와_위반_건수를_적는다(tmp_pat
     assert integrity_report(tmp_path).endswith("위반 없음")
 
 
+def test_정합성_보고서는_알림_행_수_차이도_위반으로_센다(tmp_path):
+    counters = {
+        "confirm_ok": 100,
+        "confirm_expected": 100,
+        "confirm_rejected": 0,
+        "confirm_error": 0,
+    }
+    metrics = {name: {"count": count} for name, count in counters.items()}
+    metrics["http_reqs{name:confirm}"] = {"count": 1000, "rate": 100.0}
+    metrics["http_req_duration{name:confirm}"] = {"p(95)": 900.0}
+    for name in ("dup", "overdraw"):
+        (tmp_path / f"{name}.json").write_text(json.dumps({"metrics": metrics}), encoding="utf-8")
+    checks = {"mode": "main", "sum_diff": 0, "duplicates": 0, "negative": 0, "notification_diff": 2}
+    (tmp_path / "checks.json").write_text(json.dumps(checks), encoding="utf-8")
+
+    assert "음수 잔액 0개, 알림 행 수 차이 2건 — 위반 있음" in integrity_report(tmp_path)
+
+    checks["notification_diff"] = 0
+    (tmp_path / "checks.json").write_text(json.dumps(checks), encoding="utf-8")
+    assert integrity_report(tmp_path).endswith("알림 행 수 차이 0건 — 위반 없음")
+
+
 def test_토큰_비용은_토큰_수와_단가의_곱이다():
     assert token_cost({"input": 2_000_000, "output": 500_000}, 0.05, 0.40) == pytest.approx(0.30)
     assert token_cost({}, 0.05, 0.40) == 0  # 지표가 없으면 0
