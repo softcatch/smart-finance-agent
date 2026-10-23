@@ -309,3 +309,32 @@ header button {
   background: #fff;
   color: var(--navy);
 }
+
+/* 알림 버튼은 로그아웃 왼쪽에 나란히 놓고(오른쪽 끝 정렬은 첫 버튼만), 목록은 메뉴 바로 아래에 본문과 같은 너비로 펼친다 */
+header button + button {
+  margin-left: 0;
+}
+
+#bell-list {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-top: 0;
+  background: #fff;
+  list-style: none;
+}
+
+#bell-list li {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+
+#bell-list li:last-child {
+  border-bottom: 0;
+}
+
+#bell-list li.new {
+  font-weight: 700;
+}
