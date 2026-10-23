@@ -21,6 +21,9 @@ public class Member {
   @Enumerated(EnumType.STRING)
   private Role role;
 
+  private boolean aiBlocked;
+  private String aiBlockReason;
+
   protected Member() {}
 
   Member(String loginId, String passwordHash, String name, Role role) {
@@ -44,5 +47,15 @@ public class Member {
 
   public boolean isAdmin() {
     return role == Role.ADMIN;
+  }
+
+  public boolean isAiBlocked() {
+    return aiBlocked;
+  }
+
+  // AI 사용 정지·해제(FR-031). 사유는 마지막 변경의 것만 남긴다.
+  public void blockAi(boolean blocked, String reason) {
+    this.aiBlocked = blocked;
+    this.aiBlockReason = reason;
   }
 }
