@@ -6,6 +6,7 @@ import com.softcatch.smart.alias.AliasRepository;
 import com.softcatch.smart.auth.MemberRepository;
 import com.softcatch.smart.common.ApiException;
 import com.softcatch.smart.common.ErrorCode;
+import com.softcatch.smart.notification.NotificationService;
 import com.softcatch.smart.transfer.dto.request.TransferCreateRequest;
 import com.softcatch.smart.transfer.dto.response.TransferConfirmResponse;
 import com.softcatch.smart.transfer.dto.response.TransferCreateResponse;
@@ -42,6 +43,7 @@ class TransferService {
   private final AliasRepository aliases;
   private final MemberRepository members;
   private final PasswordEncoder passwordEncoder;
+  private final NotificationService notifications;
 
   TransferService(
       TransferRequestRepository transferRequests,
@@ -49,13 +51,15 @@ class TransferService {
       AccountRepository accounts,
       AliasRepository aliases,
       MemberRepository members,
-      PasswordEncoder passwordEncoder) {
+      PasswordEncoder passwordEncoder,
+      NotificationService notifications) {
     this.transferRequests = transferRequests;
     this.transfers = transfers;
     this.accounts = accounts;
     this.aliases = aliases;
     this.members = members;
     this.passwordEncoder = passwordEncoder;
+    this.notifications = notifications;
   }
 
   @Transactional
@@ -156,6 +160,15 @@ class TransferService {
                 request.getFromAccountNumber(),
                 request.getRecipientAccountNumber(),
                 request.getAmount()));
+
+    // 알림(FR-024)은 송금과 같은 트랜잭션에 남긴다 — 커밋되면 반드시 남고 롤백되면 없다.
+    notifications.recordTransfer(
+        saved.getId(),
+        callerMemberId,
+        members.findById(callerMemberId).orElseThrow().getName(),
+        toAccount.getMemberId(),
+        request.getRecipientName(),
+        request.getAmount());
 
     Long balanceAfter = accounts.findById(fromAccount.getId()).orElseThrow().getBalance();
 
