@@ -1,6 +1,8 @@
 package com.softcatch.smart.auth;
 
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -16,12 +18,16 @@ public class Member {
   private String passwordHash;
   private String name;
 
+  @Enumerated(EnumType.STRING)
+  private Role role;
+
   protected Member() {}
 
-  Member(String loginId, String passwordHash, String name) {
+  Member(String loginId, String passwordHash, String name, Role role) {
     this.loginId = loginId;
     this.passwordHash = passwordHash;
     this.name = name;
+    this.role = role;
   }
 
   public Long getId() {
@@ -34,5 +40,9 @@ public class Member {
 
   public String getName() {
     return name;
+  }
+
+  public boolean isAdmin() {
+    return role == Role.ADMIN;
   }
 }

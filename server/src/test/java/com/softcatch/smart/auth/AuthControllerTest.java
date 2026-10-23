@@ -32,6 +32,7 @@ class AuthControllerTest {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private AuthService authService;
+  @Autowired private MemberRepository members;
   private final ObjectMapper json = new ObjectMapper();
 
   @Test
@@ -89,6 +90,15 @@ class AuthControllerTest {
                 .content(json.writeValueAsString(new LoginRequest("wrongpw01", "다른비번"))))
         .andExpect(MockMvcResultMatchers.status().isUnauthorized())
         .andExpect(MockMvcResultMatchers.jsonPath("$.error.code").value("AUTH_INVALID"));
+  }
+
+  @Test
+  void 관리자_아이디_설정에_든_아이디로_가입하면_ADMIN이고_나머지는_USER다() throws Exception {
+    signup("admin-by-config", "pw12345!", "운영자");
+    signup("plain-user01", "pw12345!", "일반");
+
+    Assertions.assertTrue(members.findByLoginId("admin-by-config").orElseThrow().isAdmin());
+    Assertions.assertFalse(members.findByLoginId("plain-user01").orElseThrow().isAdmin());
   }
 
   @Test
