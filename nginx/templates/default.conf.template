@@ -1,0 +1,75 @@
+# 유일한 입구(NFR-053). 공식 이미지가 시작할 때 환경변수(DOMAIN·UPSTREAM)를 채워 conf.d/default.conf로 만든다.
+
+# 로그인·가입은 IP별로 제한한다. 지금까지 로그인에는 횟수 제한이 없었다.
+limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/m;
+
+# Spring 컨테이너가 다시 만들어져(배포) IP가 바뀌어도 따라가게, upstream 이름을 요청마다 Docker DNS로 다시 푼다.
+resolver ${NGINX_LOCAL_RESOLVERS} valid=10s;
+
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    # 인증서 발급(HTTP-01)용 경로만 열고, 나머지는 https로 넘긴다.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN};
+
+    # /certs는 certbot이 발급·갱신해 채운다. 처음에는 자체 서명 인증서가 있다(진입 스크립트).
+    ssl_certificate /certs/fullchain.pem;
+    ssl_certificate_key /certs/privkey.pem;
+
+    set $upstream http://${UPSTREAM};
+
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    # 앞단 프록시가 없는 입구라 클라이언트가 보낸 X-Forwarded-For는 믿지 않고 실제 접속 IP로 덮어쓴다.
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_connect_timeout 5s;
+
+    # 내부용 경로는 밖에서 부르지 않는다(NFR-005): Spring↔FastAPI 내부 API와 운영 지표.
+    location ~ ^/(internal|actuator)(/|$) {
+        return 404;
+    }
+
+    # 알림 스트림(E-15): 버퍼링을 끄고, 읽기 제한은 하트비트(15초)보다 길게 둔다.
+    location = /api/v1/notifications/stream {
+        proxy_pass $upstream;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 120s;
+    }
+
+    # 로그인·가입: IP별 요청 제한. 넘으면 앱과 같은 형식의 429를 준다.
+    location ~ ^/api/v1/auth/(login|signup)$ {
+        limit_req zone=auth burst=5 nodelay;
+        limit_req_status 429;
+        error_page 429 = @rate_limited;
+        proxy_pass $upstream;
+        proxy_read_timeout 60s;
+    }
+
+    location @rate_limited {
+        default_type 'application/json; charset=utf-8';
+        return 429 '{"success":false,"data":null,"error":{"code":"RATE_LIMITED","message":"요청이 너무 많습니다. 잠시 후 다시 시도해 주세요"}}';
+    }
+
+    # 나머지. 읽기 제한은 Spring이 FastAPI를 기다리는 시간(채팅 10초·상세 30초)보다 길어야 한다.
+    # 앞단이 먼저 끊으면 끝난 일이 실패로 보인다.
+    location / {
+        proxy_pass $upstream;
+        proxy_read_timeout 60s;
+    }
+}
