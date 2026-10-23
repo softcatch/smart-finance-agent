@@ -26,6 +26,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
       SMART_JWT_SECRET: ${SMART_JWT_SECRET}
       SMART_AI_BASE_URL: http://ai:8000
+      SMART_ADMIN_LOGIN_IDS: ${SMART_ADMIN_LOGIN_IDS:-}
     ports:
       - "8080:8080"
     depends_on:

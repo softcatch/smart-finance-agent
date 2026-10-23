@@ -1,6 +1,8 @@
 package com.softcatch.smart.auth;
 
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -16,16 +18,27 @@ public class Member {
   private String passwordHash;
   private String name;
 
+  @Enumerated(EnumType.STRING)
+  private Role role;
+
+  private boolean aiBlocked;
+  private String aiBlockReason;
+
   protected Member() {}
 
-  Member(String loginId, String passwordHash, String name) {
+  Member(String loginId, String passwordHash, String name, Role role) {
     this.loginId = loginId;
     this.passwordHash = passwordHash;
     this.name = name;
+    this.role = role;
   }
 
   public Long getId() {
     return id;
+  }
+
+  public String getLoginId() {
+    return loginId;
   }
 
   String getPasswordHash() {
@@ -34,5 +47,19 @@ public class Member {
 
   public String getName() {
     return name;
+  }
+
+  public boolean isAdmin() {
+    return role == Role.ADMIN;
+  }
+
+  public boolean isAiBlocked() {
+    return aiBlocked;
+  }
+
+  // AI 사용 정지·해제(FR-031). 사유는 마지막 변경의 것만 남긴다.
+  public void blockAi(boolean blocked, String reason) {
+    this.aiBlocked = blocked;
+    this.aiBlockReason = reason;
   }
 }

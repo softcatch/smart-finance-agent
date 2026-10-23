@@ -62,6 +62,9 @@ CREATE TABLE IF NOT EXISTS ai_usage (
     fallback       BOOLEAN      NOT NULL DEFAULT FALSE  -- 장애 대체(Claude)로 답한 호출(NFR-056)
 );
 
+-- 하루 한도 확인(회원의 오늘 합계)이 채팅·상세 보기마다 읽는다. 없으면 표를 처음부터 훑어서 행이 늘수록 느려진다(개요 5절 실측).
+CREATE INDEX IF NOT EXISTS ai_usage_user_time ON ai_usage (user_id, created_at);
+
 -- 상세 보기(FR-016): 답변마다 발급한 detailId와 분석 조건. 보고서는 클릭할 때 이 조건으로 만든다.
 CREATE TABLE IF NOT EXISTS detail_condition (
     detail_id    TEXT         PRIMARY KEY,

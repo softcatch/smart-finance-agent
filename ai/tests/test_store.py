@@ -349,3 +349,23 @@ def test_사용량_테이블이_아직_없어도_만들어서_남긴다(conn):
     write_ai_usage(conn, 7, "gpt-5-nano", 10, 5)
 
     assert conn.execute("SELECT user_id, input_tokens FROM ai_usage").fetchall() == [(7, 10)]
+
+
+def test_사용량_표에_회원_시각_인덱스가_있다(conn):
+    definition = conn.execute(
+        "SELECT indexdef FROM pg_indexes WHERE indexname = 'ai_usage_user_time'"
+    ).fetchone()[0]
+
+    assert "ON public.ai_usage" in definition
+    assert "(user_id, created_at)" in definition
+
+
+def test_인덱스가_없던_기존_표에도_스키마를_다시_맞추면_만들어진다(conn):
+    conn.execute("DROP INDEX ai_usage_user_time")
+    conn.commit()
+
+    ensure_schema(conn)
+
+    assert conn.execute(
+        "SELECT 1 FROM pg_indexes WHERE indexname = 'ai_usage_user_time'"
+    ).fetchone()
