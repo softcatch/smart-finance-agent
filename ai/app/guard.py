@@ -1,5 +1,6 @@
 import re
 import secrets
+import unicodedata
 
 # 안전 판정은 LLM이 아니라 파이썬 규칙으로 한다.
 _CARD = re.compile(r"(?<!\d)\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}(?!\d)")
@@ -70,8 +71,17 @@ def restore(pending: dict, table: dict[str, str]) -> dict:
     return {**pending, "recipient_account_number": table[account]} if account in table else pending
 
 
+# 판정 전에 글자 모양만 맞춘다(NFR-012): 전각·호환 문자(ｉｇｎｏｒｅ·𝐢𝐠𝐧𝐨𝐫𝐞·ⓘ)는 NFKC로 보통 문자로,
+# 낱말 사이에 끼운 보이지 않는 서식 문자(제로폭 U+200B~U+200D·U+2060·U+FEFF 등, 범주 Cf)는 지운다.
+# 판정에만 쓴다 — LLM과 대화 기록에는 원래 글이 간다.
+def _normalize(text: str) -> str:
+    return "".join(
+        ch for ch in unicodedata.normalize("NFKC", text) if unicodedata.category(ch) != "Cf"
+    )
+
+
 def is_injection(text: str) -> bool:
-    return _INJECTION.search(text) is not None
+    return _INJECTION.search(_normalize(text)) is not None
 
 
 # 시스템 프롬프트에 심는 카나리 단어(NFR-018). 프로세스마다 새로 만들어 코드를 봐도 알 수 없다.
