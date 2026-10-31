@@ -22,11 +22,27 @@ _INJECTION = re.compile(
 )
 
 
+# 비밀번호·OTP·인증번호(NFR-055): 그 낱말 가까이(앞뒤 몇 글자)에 있는 4~8자리 숫자. 낱말 없는 숫자,
+# 단위가 붙은 숫자(5000원·2026년·4자리)는 건드리지 않는다. 숫자만 바꾸고 낱말은 남긴다.
+_SECRET_WORD = r"비밀\s*번호|비번|PIN|OTP|인증\s*번호|보안\s*카드"
+_SECRET_NUMBER = (
+    r"(?<![\d,.])\d{4,8}(?![\d,.])(?!\s*(?:원|만|천|억|년|월|일|시|분|초|개|명|회|번|%|자리))"
+)
+_SECRET_AFTER = re.compile(
+    rf"((?:{_SECRET_WORD})\s*(?:번호)?\s*(?:은|는|이|가|을|를|:|=)?\s*){_SECRET_NUMBER}",
+    re.IGNORECASE,
+)
+_SECRET_BEFORE = re.compile(
+    rf"{_SECRET_NUMBER}(?=[^\d\n]{{0,6}}?(?:{_SECRET_WORD}))", re.IGNORECASE
+)
+
+
 # LLM이 몰라도 되는 값은 지운다(되돌리지 않는다). 카드번호(16자리)를 먼저 가려야 주민번호 규칙이 그 앞 13자리를
 # 잘못 잡고, 이메일을 전화번호보다 먼저 가려야 주소 안의 숫자가 전화번호로 잘리지 않는다.
 def mask_pii(text: str) -> str:
     text = _RRN.sub("[주민번호]", _CARD.sub("[카드번호]", text))
-    return _PHONE.sub("[전화번호]", _EMAIL.sub("[이메일]", text))
+    text = _PHONE.sub("[전화번호]", _EMAIL.sub("[이메일]", text))
+    return _SECRET_BEFORE.sub("[비밀번호]", _SECRET_AFTER.sub(r"\1[비밀번호]", text))
 
 
 # 코드가 만든 답변(확인 문장·내역)의 실명 자리에 대화 기록으로 남기는 표기(NFR-055). 실명은 화면에만 보인다.
