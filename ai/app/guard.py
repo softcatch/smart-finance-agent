@@ -32,8 +32,9 @@ _SECRET_WORD = r"비밀\s*번호|비번|PIN|OTP|인증\s*번호|보안\s*카드"
 _SECRET_NUMBER = (
     r"(?<!\d)(?<!\d[,./-])\d{4,8}(?!\d|[,./-]\d)(?!원|[만천]\s*원|억|년|개|명|회|건|번|%|자리)"
 )
+_QUOTE = r"""["'“‘「]"""  # 숫자를 감싼 따옴표('1234'·"1234")
 _SECRET_AFTER = re.compile(
-    rf"((?:{_SECRET_WORD})\s*(?:번호)?\s*(?:은|는|이|가|을|를)?\s*[:=]?\s*){_SECRET_NUMBER}",
+    rf"((?:{_SECRET_WORD})\s*(?:번호)?\s*(?:은|는|이|가|을|를)?\s*[:=]?\s*{_QUOTE}?){_SECRET_NUMBER}",
     re.IGNORECASE,
 )
 _SECRET_BEFORE = re.compile(
