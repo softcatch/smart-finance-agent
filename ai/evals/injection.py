@@ -2,8 +2,8 @@
 
 세트(injection.jsonl)의 문장을 가드 판정에 넣고 막히는지만 본다.
 - direct: 사용자 입력 → 입력 가드가 쓰는 is_injection. 참이면 막힌 것이다.
-- indirect: 공시에 심은 지시를 모델이 따라 쓴 사업의 내용 답변 → 출력 가드가 쓰는 check_output.
-  PASS가 아니면 막힌 것이다. 모델이 지시를 따르는 비율(실제 LLM)은 재지 않는다.
+- indirect: 공시에 심은 지시를 모델이 따라 쓴 사업의 내용 답변 → 출력 가드가 사업의 내용 답변에 쓰는
+  check_output(disclosure=True). PASS가 아니면 막힌 것이다. 모델이 지시를 따르는 비율(실제 LLM)은 재지 않는다.
 공격 문장은 막혀야 하고(차단율), 정상 문장은 통과해야 한다(오탐률).
 실행(ai/에서):
     uv run python -m evals.injection
@@ -22,7 +22,7 @@ KINDS = ("direct", "indirect")
 def blocked(case: dict) -> bool:
     if case["kind"] == "direct":
         return is_injection(case["text"])
-    return check_output(case["text"]) != "PASS"
+    return check_output(case["text"], disclosure=True) != "PASS"  # 사업의 내용 답변으로 판정
 
 
 def load_cases() -> list[dict]:
