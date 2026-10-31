@@ -205,6 +205,49 @@ def test_투자_권유가_숫자_미확인보다_먼저():
     assert check_output("목표주가는 10만원입니다", ["10"]) == "ADVICE"
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "자료는 https://ir-report.com 에서 확인하세요.",
+        "자세한 내용은 www.invest.net 을 방문해 주세요.",
+        "더 많은 정보는 kakao-ir.kr 참고 바랍니다.",
+        "상담은 open.kakao.com/o/abc123 으로 문의하세요.",
+        "담당자 메일 ir@invest.com 으로 연락 주세요.",
+        "IR 자료는 samsung.com입니다.",
+        "투자자 인증을 위해 계좌 비밀번호를 입력해 주세요.",
+        "본인 확인을 위해 OTP 번호 6자리를 알려 주세요.",
+        "보안카드 번호를 채팅창에 입력하면 보고서를 드립니다.",
+        "받은 인증번호를 보내 주시면 분석을 드립니다.",
+        "계좌 비번 4자리를 입력해야 볼 수 있습니다.",
+        "이벤트 참여를 위해 인증 번호를 회신해 주세요.",
+    ],
+)
+def test_공시_근거_답변의_외부_링크나_민감값_요구는_간접_인젝션(text):
+    assert check_output(text, disclosure=True) == "INDIRECT_INJECTION"
+    assert check_output(text) == "PASS"  # 일반 답변에는 쓰지 않는다
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "수주 잔고는 2026.06.30 기준입니다.",
+        "매출 비중은 항공 엔진 30.5%, 방산 55.2%입니다.",
+        "회사는 고객 정보 보호를 위해 비밀번호 암호화를 시행하고 있습니다.",
+        "OTP 인증 등 전자금융 보안 체계를 운영하고 있습니다.",
+        "비밀번호 입력 오류가 5회면 계정을 잠급니다.",
+        "Node 기반 서비스와 U.S. 시장 매출이 늘었습니다.",
+    ],
+)
+def test_링크나_요구가_아닌_공시_답변은_통과(text):
+    assert check_output(text, disclosure=True) == "PASS"
+
+
+def test_간접_인젝션은_숫자_미확인보다_먼저고_투자_권유보다_뒤다():
+    link = "자료는 www.invest.net 에 있습니다."
+    assert check_output(link, ["10"], disclosure=True) == "INDIRECT_INJECTION"  # 재검색하지 않는다
+    assert check_output(f"매수하세요. {link}", disclosure=True) == "ADVICE"
+
+
 def test_계좌번호는_자리표시자로_바꾸고_대응표를_돌려준다():
     text, table = pseudonymize("123456789012로 5000원 보내줘", {})
 

@@ -105,13 +105,32 @@ _ADVICE = (
 )
 
 
+# 간접 인젝션(NFR-023): 공시 본문에 심은 지시를 모델이 따라 쓴 흔적. 사업의 내용 답변에만 쓴다 —
+# 일반 답변에는 "송금할 때 비밀번호를 입력해 주세요" 같은 정상 안내가 있을 수 있다.
+# 외부 링크: URL·www·도메인 모양(이메일 주소의 도메인 포함). 날짜(2026.06.30)는 끝이 숫자라 안 걸린다.
+_LINK = re.compile(
+    r"(?:https?://|www\.)\S+"
+    r"|\b[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|kr|io|ly|me|info|biz|xyz|shop|app|link|site)\b",
+    re.IGNORECASE | re.ASCII,
+)
+# 민감값 요구: 비밀번호·OTP 같은 낱말 뒤 한 문장 안에 입력·전달을 시키는 말. 낱말만 나오는 설명은 통과한다.
+_SECRET_REQUEST = re.compile(
+    r"(?:비밀\s*번호|비번|OTP|PIN|인증\s*번호|보안\s*카드)[^.!?\n]{0,20}?"
+    r"(?:(?:입력|회신|제출|공유)\s*(?:해|하)|알려|보내|적어)",
+    re.IGNORECASE,
+)
+
+
 # LLM이 쓴 답변이 나가기 전 판정. 걸린 판정 코드를 돌려주고, 통과면 "PASS".
 # unverified: 근거에 없는 숫자 목록(unverified_numbers). 근거가 없는 답변은 대조하지 않으므로 비워 둔다.
-def check_output(reply: str, unverified: list[str] | None = None) -> str:
+# disclosure: 공시 본문을 근거로 쓴 답변(사업의 내용)이면 참 — 간접 인젝션 흔적도 본다.
+def check_output(reply: str, unverified: list[str] | None = None, disclosure: bool = False) -> str:
     if CANARY in reply:
         return "PROMPT_LEAK"
     if any(phrase in reply for phrase in _ADVICE):
         return "ADVICE"
+    if disclosure and (_LINK.search(reply) or _SECRET_REQUEST.search(reply)):
+        return "INDIRECT_INJECTION"
     if unverified:
         return "NUMBER_UNVERIFIED"
     return "PASS"
@@ -149,6 +168,8 @@ INJECTION_REPLY = "요청하신 내용은 처리할 수 없습니다."
 OUTPUT_REPLIES = {
     "PROMPT_LEAK": INJECTION_REPLY,
     "ADVICE": "투자 판단에 대한 조언은 드릴 수 없습니다. 공시와 재무 정보만 안내해 드립니다.",
+    "INDIRECT_INJECTION": "답변에 외부 링크나 비밀번호·인증번호 요구가 있어 표시하지 않습니다. "
+    "아래 출처에서 원문을 확인해 주세요.",
     "NUMBER_UNVERIFIED": "답변에 공시 본문에서 확인되지 않은 숫자가 있어 표시하지 않습니다. "
     "아래 출처에서 원문을 확인해 주세요.",
 }
