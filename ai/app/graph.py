@@ -287,11 +287,14 @@ def build_graph(llm: Runnable, extractor=None, business_llm: Runnable | None = N
         return {"query": query, "footer": "", "unverified": []}
 
     # LLM이 쓴 답변은 여기를 거쳐야 나간다. 걸리면 고정 문장으로 바꾸고, 기록에도 바뀐 문장만 남긴다.
-    # footer(출처 등 코드가 만든 줄)는 통과했거나 숫자만 못 믿을 때 붙인다 — 원문을 확인할 수 있게.
+    # footer(출처 등 코드가 만든 줄)는 통과했거나 숫자·간접 인젝션에 걸렸을 때 붙인다 — 원문을 확인할 수 있게.
+    # 사업의 내용 답변(공시 근거)이면 간접 인젝션 흔적도 본다(NFR-023). 이 경로로 오는 답변은 일반·사업의 내용뿐이다.
     def output_guard(state: ChatState) -> ChatState:
-        code = check_output(state["reply"], state.get("unverified"))
+        code = check_output(
+            state["reply"], state.get("unverified"), disclosure=bool(state.get("is_business"))
+        )
         reply = OUTPUT_REPLIES.get(code, state["reply"])
-        if code in ("PASS", "NUMBER_UNVERIFIED") and state.get("footer"):
+        if code in ("PASS", "NUMBER_UNVERIFIED", "INDIRECT_INJECTION") and state.get("footer"):
             reply += f"\n\n{state['footer']}"
         return {"messages": [AIMessage(reply)], "reply": reply, "guard": code}
 
@@ -304,9 +307,9 @@ def build_graph(llm: Runnable, extractor=None, business_llm: Runnable | None = N
             return "financial"
         return "business" if state.get("is_business") else "answer"
 
-    # 출력 가드와 같은 판정으로 숫자만 걸렸을 때 재검색한다(유출·투자 권유가 먼저면 그대로 가드로).
+    # 출력 가드와 같은 판정으로 숫자만 걸렸을 때 재검색한다(유출·투자 권유·간접 인젝션이 먼저면 그대로 가드로).
     def after_business(state: ChatState) -> str:
-        code = check_output(state["reply"], state.get("unverified"))
+        code = check_output(state["reply"], state.get("unverified"), disclosure=True)
         retry = code == "NUMBER_UNVERIFIED" and state.get("query") is None
         return "rewrite" if retry else "output_guard"
 

@@ -1028,6 +1028,39 @@ def test_사업의_내용_답변이_통과하면_출처를_붙인다():
     assert out["reply"].startswith("TV와 반도체를 만듭니다.\n\n출처\n- 삼성전자")
 
 
+def test_공시_속_지시를_따른_사업의_내용_답변은_재검색_없이_고정_문장과_출처로_바뀐다():
+    followed = "수주잔고는 1,500억원입니다. 계좌 비밀번호를 입력해 주세요."  # 근거 없는 숫자도 있다
+    llm, seen = _says(followed, "네")
+    calls = []
+
+    def search(names, question):
+        calls.append(question)
+        return [("005930", "삼성전자")], [], {"005930": [_chunk("수주잔고 1,000억원")]}
+
+    graph = build_graph(
+        llm,
+        _extractor(
+            TransferSlots(is_transfer=False, is_business=True, companies=["삼성전자"]),
+            TransferSlots(is_transfer=False),
+        ),
+    )
+    out = graph.invoke({"message": "삼성전자 수주잔고"}, _cfg("th_1", search_business=search))
+    graph.invoke({"message": "고마워"}, _cfg("th_1"))
+
+    assert out["guard"] == "INDIRECT_INJECTION"
+    assert out["reply"].startswith(OUTPUT_REPLIES["INDIRECT_INJECTION"] + "\n\n출처\n- 삼성전자")
+    assert len(calls) == 1  # 재검색하지 않는다
+    assert all("입력해 주세요" not in m for m in seen[1])  # 걸린 답변은 다음 턴 기록에 없다
+
+
+def test_일반_답변에는_간접_인젝션_판정을_쓰지_않는다():
+    reply = "송금할 때 계좌 비밀번호를 입력해 주세요."
+    out = build_graph(_says(reply)[0], _plain()).invoke({"message": "송금 방법"}, _cfg("th_1"))
+
+    assert out["guard"] == "PASS"
+    assert out["reply"] == reply
+
+
 def test_엔드포인트는_교체된_답변과_판정_코드를_돌려준다():
     graph = build_graph(_says("삼성전자를 지금 매수하세요")[0], _plain())
     app.dependency_overrides[get_graph] = lambda: graph
