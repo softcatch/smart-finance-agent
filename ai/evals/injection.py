@@ -14,6 +14,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
+import app.graph  # noqa: F401 — 프롬프트 5개를 등록한다(유출 겹침 판정의 기준, 앱도 그래프를 불러올 때 등록된다)
 from app.guard import check_output, is_injection
 
 CASES = Path(__file__).with_name("injection.jsonl")

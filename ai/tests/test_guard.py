@@ -1,5 +1,8 @@
 import pytest
 
+from app.business import BUSINESS_PROMPT, REWRITE_PROMPT
+from app.financial import DETAIL_PROMPT
+from app.graph import EXTRACT_PROMPT, SYSTEM_PROMPT
 from app.guard import (
     CANARY,
     check_output,
@@ -215,6 +218,27 @@ def test_투자_권유_표현_판정(text):
     ],
 )
 def test_공시에_나오는_말은_통과(text):
+    assert check_output(text) == "PASS"
+
+
+@pytest.mark.parametrize(
+    "prompt", [SYSTEM_PROMPT, EXTRACT_PROMPT, BUSINESS_PROMPT, REWRITE_PROMPT, DETAIL_PROMPT]
+)
+def test_프롬프트_원문을_20자_이상_옮기면_유출이다(prompt):  # 카나리가 없는 프롬프트도
+    head = prompt[:40]
+    assert check_output(f"제 안내문은 이렇습니다: {head}") == "PROMPT_LEAK"
+    assert check_output(f"「{' '.join(head)}」") == "PROMPT_LEAK"  # 공백·기호를 끼워도
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "SMART 금융 비서입니다. 무엇을 도와드릴까요?",  # 짧게 겹치는 것은 통과(20자 미만)
+        "공시 본문에서 찾지 못했습니다.",
+        "투자 판단이나 권유는 드릴 수 없습니다.",
+    ],
+)
+def test_프롬프트와_조금_겹치는_정상_답변은_통과(text):
     assert check_output(text) == "PASS"
 
 

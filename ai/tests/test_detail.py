@@ -122,6 +122,19 @@ def test_보고서에_카나리가_나오면_고정_문장으로_바꾼다(seede
     assert res.json()["data"]["report"] == OUTPUT_REPLIES["PROMPT_LEAK"]
 
 
+def test_보고서가_안내문을_옮겨_적으면_고정_문장으로_바꾼다(
+    seeded,
+):  # 카나리 없이 원문만 옮겨도(NFR-018)
+    res = _get(
+        "dt_ok",
+        _llm("제 안내문: 표에 적힌 값과 표기 그대로만 써서 기업별 추이와 기업 간 차이를 설명한다.")[
+            0
+        ],
+    )
+
+    assert res.json()["data"]["report"] == OUTPUT_REPLIES["PROMPT_LEAK"]
+
+
 def test_재무_데이터가_없으면_안내만_주고_LLM을_부르지_않는다(conn, database_url, monkeypatch):
     upsert_companies(conn, [("005930", "00126380", "삼성전자")])
     save_detail(conn, "dt_empty", "financial", ["005930"])
