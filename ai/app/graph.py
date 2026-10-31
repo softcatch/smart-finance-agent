@@ -49,6 +49,9 @@ EXTRACT_PROMPT = guarded_prompt(
     "금액은 원 단위 정수, 별칭은 들은 그대로 쓴다. 메시지의 [계좌1] 같은 표기는 가려 둔 계좌번호라서, "
     "수취인 계좌번호이면 recipient_account_number에 그 표기를 그대로 넣는다.\n진행 중인 송금: {pending}"
 )
+# 의도 추출이 뽑은 기업 이름은 코드 답변("찾지 못한 기업: …")에 그대로 되풀이되고 출력 가드를 거치지 않는다.
+# 기업 이름 자리에 넣은 공격 문장이 화면에 나오지 않게, 상장사 정식명보다 넉넉한 길이를 넘으면 쓰지 않는다(LLM05).
+MAX_COMPANY_NAME = 30
 SEARCH_DOWN_REPLY = "지금 공시 본문을 검색할 수 없습니다. 잠시 후 다시 시도해 주세요."
 NOT_FOUND_REPLY = "계좌나 별칭을 찾을 수 없습니다. 받는 분의 계좌번호나 별칭을 다시 알려 주세요."
 
@@ -149,7 +152,7 @@ def build_graph(llm: Runnable, extractor=None, business_llm: Runnable | None = N
             "is_business": slots.is_business
             and not slots.is_history
             and not slots.is_financial,  # 사업의 내용은 내역·재무보다 뒤
-            "companies": slots.companies,
+            "companies": [name for name in slots.companies if len(name) <= MAX_COMPANY_NAME],
             "pending": {},
         }
 
