@@ -39,8 +39,8 @@ def test_세트는_범주별_최소_개수를_채운다():  # 비어서 통과�
 
 
 # 회귀 기준(#95): 지금 수치보다 나빠지면 실패한다. 세트는 고정 — 개선으로 수치가 오르면 같은 PR에서 올린다.
-MIN_CAUGHT = {"direct": 23, "indirect": 13}  # 공격 56·13개 중
-MAX_FALSE_HITS = {"direct": 3, "indirect": 0}  # 정상 22·12개 중
+MIN_CAUGHT = {"direct": 23, "indirect": 13, "leak": 9}  # 공격 56·13·14개 중
+MAX_FALSE_HITS = {"direct": 3, "indirect": 0, "leak": 0}  # 정상 22·12·12개 중
 
 
 def test_차단율과_오탐률이_기준보다_나빠지지_않는다():
