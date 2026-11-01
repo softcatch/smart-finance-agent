@@ -77,11 +77,14 @@ def main() -> None:
     cases = [json.loads(line) for line in CASES.read_text(encoding="utf-8").splitlines()]
     # 응답 없이 멈추거나 끊긴 호출 하나가 몇 분짜리 측정을 망치지 않게 타임아웃을 두고 일시 오류는 다시 보낸다.
     # 앱의 동작이 아니라 측정 도구의 안전장치다(정확도에는 영향이 없다).
-    llm = make_llm(timeout=30)
-    extractor = llm.with_structured_output(TransferSlots).with_retry(
-        retry_if_exception_type=(openai.APIConnectionError, openai.InternalServerError),
-        stop_after_attempt=3,
-    )
+    # 의도 추출기와 답변 모델(되묻기·일반 답변) 모두에 건다 — 한쪽만 걸면 다른 쪽의 타임아웃 하나가 측정을 멈춘다.
+    model = make_llm(timeout=30)
+    retry = {
+        "retry_if_exception_type": (openai.APIConnectionError, openai.InternalServerError),
+        "stop_after_attempt": 3,
+    }
+    llm = model.with_retry(**retry)
+    extractor = model.with_structured_output(TransferSlots).with_retry(**retry)
     scores: dict[str, list[int]] = {"계좌번호": [], "별칭": []}
     failed: Counter = Counter()
     kinds: Counter = Counter()  # (발화 종류, 실패 종류) → 건수
