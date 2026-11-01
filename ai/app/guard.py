@@ -109,6 +109,27 @@ def is_injection(text: str) -> bool:
 # 답변에 나오면 프롬프트가 샌 것이다.
 CANARY = f"카나리-{secrets.token_hex(4)}"
 
+# 프롬프트 원문 겹침(NFR-018): 카나리는 그대로 옮겨야만 잡히고 의도 추출·재검색 프롬프트에는 없다. 그래서
+# 프롬프트를 정의할 때 guarded_prompt로 등록해 두고, 답변이 어느 프롬프트와든 공백·기호를 뺀 20자 이상
+# 이어서 겹치면 샌 것으로 본다. 번역·요약해서 옮긴 것은 못 잡는다.
+_OVERLAP = 20
+_PROMPT_PIECES: set[str] = set()
+
+
+def _squash(text: str) -> str:
+    return re.sub(r"[\W_]+", "", text).lower()
+
+
+def _pieces(text: str) -> set[str]:
+    plain = _squash(text)
+    return {plain[i : i + _OVERLAP] for i in range(len(plain) - _OVERLAP + 1)}
+
+
+def guarded_prompt(text: str) -> str:
+    _PROMPT_PIECES.update(_pieces(text))
+    return text
+
+
 # 투자 권유 표현 목록(NFR-017). '자기주식 매수'·'비중 확대'처럼 공시에 나오는 말은 넣지 않는다.
 _ADVICE = (
     "매수하세요",
@@ -156,7 +177,7 @@ _SECRET_REQUEST = re.compile(
 # unverified: 근거에 없는 숫자 목록(unverified_numbers). 근거가 없는 답변은 대조하지 않으므로 비워 둔다.
 # disclosure: 공시 본문을 근거로 쓴 답변(사업의 내용)이면 참 — 간접 인젝션 흔적도 본다.
 def check_output(reply: str, unverified: list[str] | None = None, disclosure: bool = False) -> str:
-    if CANARY in reply:
+    if CANARY in reply or not _pieces(reply).isdisjoint(_PROMPT_PIECES):
         return "PROMPT_LEAK"
     if any(phrase in reply for phrase in _ADVICE):
         return "ADVICE"

@@ -1,6 +1,6 @@
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.guard import CANARY
+from app.guard import CANARY, guarded_prompt
 
 # 재무 비교 표를 만든다. 기간 선택·기준 선택·증감·영업이익률은 모두 여기서(코드가) 계산한다 — LLM은 숫자를 만들지 않는다.
 LABELS = {"11013": "1분기", "11012": "2분기", "11014": "3분기", "11011": "연간", "Q4": "4분기"}
@@ -210,7 +210,7 @@ def build_detail_table(
 
 
 # --- 상세 보고서(FR-016): 클릭할 때 만든다. 숫자는 위 표(코드가 계산)에 있는 값만 쓴다(NFR-002).
-DETAIL_PROMPT = (
+DETAIL_PROMPT = guarded_prompt(
     "너는 SMART 금융 비서다. 아래 <표>는 코드가 계산한 기업별 분기 실적이다. 표에 적힌 값과 표기 "
     "그대로만 써서 기업별 추이와 기업 간 차이를 한국어로 설명하는 짧은 보고서를 쓴다. 표에 없는 숫자는 "
     "쓰지 않고, 값을 더하거나 빼는 계산·단위 변환·반올림을 하지 않는다. 투자 판단이나 권유는 하지 않는다. "
