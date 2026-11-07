@@ -75,7 +75,7 @@ class TransferControllerTest {
                     json.writeValueAsString(
                         new TransferCreateRequest(recipientAccount.accountNumber(), null, 10000L))))
         .andExpect(MockMvcResultMatchers.status().isCreated())
-        .andExpect(MockMvcResultMatchers.jsonPath("$.data.recipientName").value("김영희"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.recipientName").value("김*희"))
         .andExpect(
             MockMvcResultMatchers.jsonPath("$.data.recipientAccountNumber")
                 .value(recipientAccount.accountNumber()))
@@ -99,7 +99,7 @@ class TransferControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(new TransferCreateRequest(null, "친구", 3000L))))
         .andExpect(MockMvcResultMatchers.status().isCreated())
-        .andExpect(MockMvcResultMatchers.jsonPath("$.data.recipientName").value("이영희"))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.recipientName").value("이*희"))
         .andExpect(
             MockMvcResultMatchers.jsonPath("$.data.recipientAccountNumber")
                 .value(recipientAccount.accountNumber()));

@@ -46,7 +46,7 @@ class AliasControllerTest {
         .andExpect(MockMvcResultMatchers.status().isCreated())
         .andExpect(MockMvcResultMatchers.jsonPath("$.data.alias").value("엄마"))
         .andExpect(MockMvcResultMatchers.jsonPath("$.data.accountNumber").value(ownerAccountNumber))
-        .andExpect(MockMvcResultMatchers.jsonPath("$.data.ownerName").value(ownerName));
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.ownerName").value("홍*동")); // 예금주 이름은 가린다
   }
 
   @Test
@@ -104,11 +104,11 @@ class AliasControllerTest {
         .andExpect(MockMvcResultMatchers.jsonPath("$.data.aliases[0].alias").value("엄마"))
         .andExpect(
             MockMvcResultMatchers.jsonPath("$.data.aliases[0].accountNumber").value(accountA))
-        .andExpect(MockMvcResultMatchers.jsonPath("$.data.aliases[0].ownerName").value(motherName))
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.aliases[0].ownerName").value("엄**름"))
         .andExpect(MockMvcResultMatchers.jsonPath("$.data.aliases[1].alias").value("친구"))
         .andExpect(
             MockMvcResultMatchers.jsonPath("$.data.aliases[1].accountNumber").value(accountB))
-        .andExpect(MockMvcResultMatchers.jsonPath("$.data.aliases[1].ownerName").value(friendName));
+        .andExpect(MockMvcResultMatchers.jsonPath("$.data.aliases[1].ownerName").value("친**름"));
   }
 
   @Test

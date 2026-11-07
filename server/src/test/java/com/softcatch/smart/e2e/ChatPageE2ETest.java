@@ -246,12 +246,13 @@ class ChatPageE2ETest extends E2ETestBase {
     page.navigate(url("/chat"));
     page.fill("input[name=message]", "김영희한테 1만원 보내줘");
     page.click("#chat-form button");
-    assertThat(page.locator(".transfer-card")).containsText("김영희");
+    assertThat(page.locator(".transfer-card")).containsText("김*희"); // 돈이 나가기 전이라 가린다
+    assertThat(page.locator(".transfer-card")).not().containsText("김영희");
     assertThat(page.locator(".transfer-card")).containsText("10,000원");
     page.fill(".transfer-card input[name=password]", ACCOUNT_PASSWORD);
     page.click(".transfer-card button");
 
-    assertThat(page.locator(".card-result")).containsText("송금 완료");
+    assertThat(page.locator(".card-result")).containsText("송금 완료: 김영희님께"); // 보낸 뒤엔 실명
     assertThat(page.locator(".card-result")).containsText("잔액 40,000원");
     assertEquals(40000L, balanceOf(senderToken));
     assertEquals(10000L, balanceOf(recipientToken));
