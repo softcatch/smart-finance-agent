@@ -24,7 +24,7 @@ class AliasesPageE2ETest extends E2ETestBase {
     assertThat(row).hasCount(1);
     assertThat(row).containsText("엄마");
     assertThat(row).containsText(accountNumber);
-    assertThat(row).containsText("김영희"); // 예금주 이름
+    assertThat(row).containsText("김*희"); // 예금주 이름은 가린다
   }
 
   @Test
