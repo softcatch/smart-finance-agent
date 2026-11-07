@@ -81,6 +81,8 @@ async def metrics() -> Response:
 # 사업의 내용 7.8·상세 보고서 22.8초)에 여유를 두되 Spring 읽기 제한(채팅 10초·상세 30초)을 넘지 않는다.
 # OpenAI·Claude 호출에 같은 값을 쓴다. 재검색의 재작성은 answer 값을 쓴다.
 TIMEOUTS = {"extract": 5, "answer": 7, "business": 10, "report": 30}
+# 출력 가드의 투자 권유 임베딩(초). 실측 p95 0.2초. 답변을 다 쓴 뒤라 짧게 끊고 재시도하지 않는다 — 넘기면 목록 판정만.
+ADVICE_EMBED_TIMEOUT = 1
 # 이 오류면 같은 요청을 Claude로 한 번 더 보낸다: 429, 5xx, 연결 실패(타임아웃은 연결 오류의 하위).
 # 400·401 같은 요청·설정 오류는 모델을 바꿔도 같아서 대체하지 않는다.
 FALLBACK_ON = (openai.RateLimitError, openai.InternalServerError, openai.APIConnectionError)
@@ -222,7 +224,7 @@ def member_id(authorization: str | None) -> int | None:
 
 # 출력 가드의 투자 권유 의미 판정(NFR-017 2단계)에 쓰는 임베딩. 테스트는 conftest가 끈다(None).
 def advice_embed(texts: list[str]) -> list[list[float]]:
-    return embed_texts(texts)
+    return embed_texts(texts, timeout=ADVICE_EMBED_TIMEOUT, max_retries=0)
 
 
 class AuthInvalid(Exception):

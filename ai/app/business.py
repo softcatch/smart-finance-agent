@@ -159,9 +159,16 @@ def chunk_lines(lines: list[tuple[str, str]], limit: int = MAX_CHARS) -> list[tu
 
 
 # 청크 본문 → 벡터. 요청당 토큰 한도(30만)를 넘지 않게 100개씩 보낸다.
-def embed_texts(texts: list[str]) -> list[list[float]]:
+# 기본(수집·검색)은 SDK 기본값(타임아웃 없음·재시도 2회)이다. 채팅 답변을 기다리게 하는 호출은 짧게 넘긴다.
+def embed_texts(
+    texts: list[str], timeout: float | None = None, max_retries: int = 2
+) -> list[list[float]]:
     embeddings = OpenAIEmbeddings(
-        model=EMBEDDING_MODEL, chunk_size=100, check_embedding_ctx_length=False
+        model=EMBEDDING_MODEL,
+        chunk_size=100,
+        check_embedding_ctx_length=False,
+        timeout=timeout,
+        max_retries=max_retries,
     )
     try:
         with EMBEDDING_SECONDS.time():
