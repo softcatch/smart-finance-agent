@@ -1,10 +1,14 @@
+import httpx
+import openai
 import pytest
 
 from app.business import BUSINESS_PROMPT, REWRITE_PROMPT
 from app.financial import DETAIL_PROMPT
 from app.graph import EXTRACT_PROMPT, SYSTEM_PROMPT
 from app.guard import (
+    _ADVICE_ANCHORS,
     CANARY,
+    advice_like,
     check_output,
     is_injection,
     is_unknown_mark,
@@ -430,3 +434,31 @@ def test_대응표에_없는_자리표시자는_지어낸_것이다():
 )
 def test_LLM이_꾸며_돌려준_자리표시자를_하나의_표기로_맞춘다(value, expected):
     assert normalize_mark(value) == expected
+
+
+# 가짜 임베딩: '적기'·권유 기준 문장은 권유 방향, 나머지는 정상 방향(단위 벡터). 부른 횟수를 센다.
+class FakeEmbed:
+    def __init__(self):
+        self.calls = 0
+
+    def __call__(self, texts):
+        self.calls += 1
+        return [[1.0, 0.0] if "적기" in t or t in _ADVICE_ANCHORS else [0.0, 1.0] for t in texts]
+
+
+def test_목록에_없는_권유도_의미가_가까우면_ADVICE():
+    embed = FakeEmbed()
+
+    assert check_output("삼성전자 실적은 좋습니다. 지금이 매수 적기입니다", embed=embed) == "ADVICE"
+    assert check_output("영업이익이 늘었습니다", embed=embed) == "PASS"
+    assert check_output("지금이 매수 적기입니다") == "PASS"  # 임베딩이 없으면 목록만 본다
+    assert embed.calls == 3  # 기준 문장은 한 번만 임베딩한다(답변 2번 + 기준 1번)
+
+
+def test_임베딩이_실패하면_목록_판정만_남는다():
+    def down(texts):
+        raise openai.APIConnectionError(request=httpx.Request("POST", "https://api.openai.com"))
+
+    assert advice_like("지금이 매수 적기입니다", down) is False
+    assert check_output("지금이 매수 적기입니다", embed=down) == "PASS"
+    assert check_output("지금 매수하세요", embed=down) == "ADVICE"

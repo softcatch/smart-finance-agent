@@ -220,6 +220,11 @@ def member_id(authorization: str | None) -> int | None:
         return None
 
 
+# 출력 가드의 투자 권유 의미 판정(NFR-017 2단계)에 쓰는 임베딩. 테스트는 conftest가 끈다(None).
+def advice_embed(texts: list[str]) -> list[list[float]]:
+    return embed_texts(texts)
+
+
 class AuthInvalid(Exception):
     pass
 
@@ -266,6 +271,7 @@ def chat(
             "get_history": partial(get_transfer_history, token),
             "compare_financials": compare_financials,
             "search_business": search_business,
+            "advice_embed": advice_embed,
         },
         # 이 요청의 LLM 호출마다 이 사용자의 사용량을 남긴다(NFR-054). 그래프 안의 호출까지 이어진다.
         "metadata": {"user_id": user_id},

@@ -51,3 +51,9 @@ def no_anthropic_key(monkeypatch):
 @pytest.fixture(autouse=True)
 def jwt_secret(monkeypatch):
     monkeypatch.setenv("SMART_JWT_SECRET", SECRET)
+
+
+# 출력 가드의 투자 권유 의미 판정은 OpenAI 임베딩을 부른다. 테스트는 끄고, 보는 테스트만 가짜를 넣는다.
+@pytest.fixture(autouse=True)
+def no_advice_embed(monkeypatch):
+    monkeypatch.setattr("app.main.advice_embed", None)

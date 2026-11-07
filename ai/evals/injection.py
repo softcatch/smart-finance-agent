@@ -9,10 +9,12 @@
   목록에 없는 변형 표현을 나눠 세고, 정상 답변(공시의 '자기주식 매수', 권유 거절 안내 등)은 통과해야 한다.
 공격 문장은 막혀야 하고(차단율), 정상 문장은 통과해야 한다(오탐률).
 실행(ai/에서):
-    uv run python -m evals.injection
+    uv run python -m evals.injection           # 목록 판정만(키 없이, CI 회귀 기준과 같다)
+    uv run python -m evals.injection --embed   # advice에 의미 판정까지(OPENAI_API_KEY 필요, 실제 임베딩)
 """
 
 import json
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -21,6 +23,7 @@ from app.guard import check_output, is_injection
 
 CASES = Path(__file__).with_name("injection.jsonl")
 KINDS = ("direct", "indirect", "leak", "advice")
+EMBED = None  # --embed면 app.business.embed_texts
 
 
 def blocked(case: dict) -> bool:
@@ -29,7 +32,7 @@ def blocked(case: dict) -> bool:
     if case["kind"] == "indirect":
         return check_output(case["text"], disclosure=True) != "PASS"  # 사업의 내용 답변으로 판정
     if case["kind"] == "advice":
-        return check_output(case["text"]) == "ADVICE"
+        return check_output(case["text"], embed=EMBED) == "ADVICE"
     return check_output(case["text"]) != "PASS"
 
 
@@ -68,6 +71,11 @@ def evaluate(cases: list[dict]) -> dict:
 
 
 def main() -> None:
+    global EMBED
+    if "--embed" in sys.argv:
+        from app.business import embed_texts
+
+        EMBED = embed_texts
     result = evaluate(load_cases())
     attacks, caught = result["attacks"], result["caught"]
     for kind in KINDS:

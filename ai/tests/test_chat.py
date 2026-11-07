@@ -1652,3 +1652,20 @@ def test_확인하지_못한_토큰은_401이고_그래프를_돌리지_않는�
     }
     assert seen == []  # LLM을 부르지 않았다
     assert list(graph.checkpointer.list(None)) == []  # 대화 기록도 없다
+
+
+def test_출력_가드는_config의_임베딩으로_목록에_없는_권유도_막는다():
+    def embed(texts):  # '적기'만 권유 방향(기준 문장 중 권유 쪽도 같은 방향)
+        return [
+            [1.0, 0.0] if "적기" in t or "권합니다" in t or "좋겠습니다" in t else [0.0, 1.0]
+            for t in texts
+        ]
+
+    graph = build_graph(_says("지금이 매수 적기입니다")[0], _plain())
+    out = graph.invoke(
+        {"message": "삼성전자 살까?"},
+        {"configurable": {"thread_id": "th_1", "advice_embed": embed}},
+    )
+
+    assert out["guard"] == "ADVICE"
+    assert out["reply"] == OUTPUT_REPLIES["ADVICE"]
