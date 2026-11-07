@@ -16,10 +16,10 @@ from app.graph import build_graph
 from app.main import app, get_graph
 from app.metrics import LlmMetrics
 from app.transfer import TransferSlots
+from tests.tokens import bearer
 
-# sub가 "7"·"8"인 JWT 모양(헤더.payload.서명). 서명은 FastAPI가 보지 않는다.
-BEARER_7 = "Bearer h.eyJzdWIiOiI3In0.s"
-BEARER_8 = "Bearer h.eyJzdWIiOiI4In0.s"
+BEARER_7 = bearer("7")
+BEARER_8 = bearer("8")
 
 
 def _value(name: str, **labels) -> float:
@@ -38,7 +38,11 @@ def test_채팅_한_턴이_HTTP_지연과_노드_시간과_가드_판정을_남�
         _value("guard_decisions_total", where="chat", code="PASS"),
     )
     try:
-        TestClient(app).post("/internal/chat", json={"threadId": "th_m", "message": "안녕"})
+        TestClient(app).post(
+            "/internal/chat",
+            json={"threadId": "th_m", "message": "안녕"},
+            headers={"Authorization": BEARER_7},
+        )
     finally:
         app.dependency_overrides.clear()
 
@@ -240,7 +244,6 @@ def test_채팅_한_턴의_모든_LLM_호출이_요청한_회원의_ID로_남는
     try:
         TestClient(app).post("/internal/chat", json=body, headers={"Authorization": BEARER_7})
         TestClient(app).post("/internal/chat", json=body, headers={"Authorization": BEARER_8})
-        TestClient(app).post("/internal/chat", json=body)  # 사용자를 모르면 남기지 않는다
     finally:
         app.dependency_overrides.clear()
 

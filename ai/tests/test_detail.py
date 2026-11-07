@@ -10,6 +10,7 @@ from app.financial import NO_DATA_REPORT, REPORT_UNVERIFIED, build_detail_table
 from app.guard import CANARY, OUTPUT_REPLIES
 from app.metrics import LlmMetrics
 from app.store import save_detail, upsert_companies, upsert_financials
+from tests.tokens import bearer
 
 
 def _row(stock, year, reprt, account, amount, prev, fs_div="CFS"):
@@ -55,11 +56,11 @@ def _llm(text: str):
     return RunnableLambda(fake), seen
 
 
-def _get(detail_id: str, llm, token: str = "Bearer t"):
+def _get(detail_id: str, llm, token: str | None = None):
     main.app.dependency_overrides[main.get_llm] = lambda: llm
     try:
         return TestClient(main.app).get(
-            f"/internal/details/{detail_id}", headers={"Authorization": token}
+            f"/internal/details/{detail_id}", headers={"Authorization": token or bearer()}
         )
     finally:
         main.app.dependency_overrides.clear()
@@ -154,6 +155,16 @@ def test_보고서_호출도_요청한_회원의_ID로_남는다(seeded):
         callbacks=[LlmMetrics(lambda *args: users.append(args[0]))],
     )
 
-    _get("dt_ok", llm, "Bearer h.eyJzdWIiOiI3In0.s")  # sub가 "7"인 JWT 모양
+    _get("dt_ok", llm, bearer("7"))
 
     assert users == [7]
+
+
+def test_확인하지_못한_토큰은_401이고_보고서를_쓰지_않는다(seeded):
+    llm, seen = _llm("쓰이면 안 됨")
+
+    res = _get("dt_ok", llm, bearer("7", secret="other-secret-that-is-at-least-32-bytes"))
+
+    assert res.status_code == 401
+    assert res.json()["error"]["code"] == "AUTH_INVALID"
+    assert seen == []

@@ -8,7 +8,6 @@ Claude의 지연도 같은 분포를 쓴다. 같은 시나리오를 대체(Claud
     uv run python -m evals.fallback
 """
 
-import base64
 import json
 import math
 import os
@@ -19,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import httpx
+import jwt
 
 from app import main
 from loadtest.fake_llm import LATENCY, Faults, create_app, serve
@@ -26,7 +26,9 @@ from loadtest.fake_llm import LATENCY, Faults, create_app, serve
 TURNS = 60
 WORKERS = 12
 LIMIT = 10.0  # Spring 채팅 읽기 제한(초). 이보다 늦은 응답은 사용자에게 가지 못한다
-TOKEN = "Bearer h." + base64.urlsafe_b64encode(b'{"sub":"9"}').decode().rstrip("=") + ".s"
+# 측정용 키로 서명한 JWT(회원 9). 앱도 같은 키로 확인한다.
+SECRET = "fallback-eval-secret-at-least-32-bytes"
+TOKEN = "Bearer " + jwt.encode({"sub": "9", "exp": int(time.time()) + 86400}, SECRET, "HS256")
 
 # (이름, OpenAI 장애, Anthropic 장애, 대체가 있을 때만 재는지). 비율은 LLM 호출 하나당이다.
 SCENARIOS = [
@@ -63,6 +65,7 @@ def summarize(results: list[tuple[int, float]], calls: Counter) -> dict:
 def run(samples: dict, openai: Faults, anthropic: Faults, claude: bool) -> dict:
     fake_url, stop_fake = serve(create_app(samples, 1, openai=openai, anthropic=anthropic))
     os.environ["OPENAI_API_KEY"] = "fake"
+    os.environ["SMART_JWT_SECRET"] = SECRET
     os.environ["OPENAI_BASE_URL"] = fake_url
     os.environ["ANTHROPIC_API_URL"] = fake_url.removesuffix("/v1")
     os.environ["ANTHROPIC_API_KEY"] = "fake" if claude else ""

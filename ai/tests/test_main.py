@@ -1,7 +1,7 @@
-import base64
-import json
+import time
 from typing import ClassVar
 
+import jwt
 import psycopg
 import pytest
 from langchain_core.runnables import RunnableLambda
@@ -10,6 +10,7 @@ from app import main
 from app.main import log_chat as real_log_chat
 from app.store import replace_business_chunks, upsert_companies
 from app.transfer import TransferSlots
+from tests.tokens import SECRET, bearer
 
 
 # ChatOpenAI 자리에 끼워 넣는 가짜: 모델을 만들 때 받은 인자를 기록한다.
@@ -152,24 +153,29 @@ def test_사용량을_못_써도_예외가_나가지_않는다(monkeypatch):
     main.record_usage(7, "gpt-5-nano", 10, 5)  # 채팅은 사용량 기록 때문에 실패하지 않는다
 
 
-def _bearer(claims: dict) -> str:
-    # Spring이 보내는 JWT 모양(헤더.payload.서명, 패딩 없는 base64url). 서명은 FastAPI가 보지 않는다.
-    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b"=").decode()
-    return f"Bearer eyJhbGciOiJIUzI1NiJ9.{payload}.c2ln"
-
-
 def test_JWT의_sub에서_회원_ID를_읽는다():
-    assert main.member_id(_bearer({"sub": "7", "exp": 1790000000})) == 7
+    assert main.member_id(bearer("7")) == 7
 
 
-def test_회원_ID를_못_읽으면_None():
+def test_서명이나_만료가_틀리면_회원_ID를_읽지_않는다():
+    forged = bearer("7").rsplit(".", 1)[0] + "." + bearer("8").rsplit(".", 1)[1]
+    unsigned = jwt.encode({"sub": "7", "exp": int(time.time()) + 60}, None, algorithm="none")
     broken = [
         None,  # Authorization 헤더 없음
         "Bearer t",  # JWT 모양이 아님
-        "Bearer a.!!!.c",  # payload가 base64가 아님
-        _bearer({"exp": 1}),  # sub 없음
-        _bearer({"sub": "abc"}),  # 숫자가 아님
-        "Bearer a." + base64.urlsafe_b64encode(b"[1]").decode() + ".c",  # payload가 객체가 아님
+        bearer("7", secret="other-secret-that-is-at-least-32-bytes"),  # 다른 키로 서명
+        forged,  # sub를 바꾸고 다른 토큰의 서명을 붙임
+        "Bearer " + unsigned,  # alg none
+        bearer("7", exp=int(time.time()) - 1),  # 만료
+        bearer("abc"),  # 숫자가 아님
+        "Bearer "
+        + jwt.encode({"exp": int(time.time()) + 60}, SECRET, algorithm="HS256"),  # sub 없음
     ]
 
     assert [main.member_id(value) for value in broken] == [None] * len(broken)
+
+
+def test_키가_없으면_회원_ID를_읽지_않는다(monkeypatch):
+    monkeypatch.delenv("SMART_JWT_SECRET")
+
+    assert main.member_id(bearer("7")) is None

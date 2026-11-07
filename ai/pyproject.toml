@@ -10,6 +10,7 @@ dependencies = [
     "langgraph>=1.2.15",
     "prometheus-client>=0.26.0",
     "psycopg[binary]>=3.3.6",
+    "pyjwt>=2.15.1",
     "uvicorn[standard]",
 ]
 

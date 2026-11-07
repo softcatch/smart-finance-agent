@@ -7,7 +7,8 @@ on:
 
 jobs:
   server:
-    runs-on: ubuntu-latest
+    # ubuntu-latest(26.04)에는 Playwright 1.52의 chromium이 없다. 지원 버전으로 올릴 때까지 고정한다
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: server
@@ -18,7 +19,7 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v6
-      # Playwright가 크로미움을 실행하려면 리눅스 시스템 패키지가 필요하다(sudo, ubuntu-latest만 해당)
+      # Playwright가 크로미움을 실행하려면 리눅스 시스템 패키지가 필요하다(sudo, GitHub 우분투 러너만 해당)
       - run: ./gradlew playwrightInstallDeps
       # 테스트는 Testcontainers(pgvector)로 실제 PostgreSQL에서 돈다
       - run: ./gradlew spotlessCheck test

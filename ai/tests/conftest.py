@@ -2,6 +2,8 @@ import psycopg
 import pytest
 from testcontainers.community.postgres import PostgresContainer
 
+from tests.tokens import SECRET
+
 
 # 실제 PostgreSQL(compose와 같은 pgvector 이미지)로 SQL을 검증한다 — 가짜 DB를 쓰지 않는다.
 @pytest.fixture(scope="session")
@@ -43,3 +45,9 @@ def no_dev_db(monkeypatch):
 @pytest.fixture(autouse=True)
 def no_anthropic_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+
+# FastAPI가 JWT 서명을 확인하는 키. 테스트 토큰(tests/tokens.py)과 같은 값이다.
+@pytest.fixture(autouse=True)
+def jwt_secret(monkeypatch):
+    monkeypatch.setenv("SMART_JWT_SECRET", SECRET)
