@@ -52,6 +52,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       SMART_SERVER_BASE_URL: http://server:8080
+      # Spring과 같은 키로 JWT 서명·만료를 다시 확인한다. 없으면 채팅·상세 보기가 전부 401이다
+      SMART_JWT_SECRET: ${SMART_JWT_SECRET}
 
   # DART 수집 스케줄러(하루 1회): 재무 숫자, 사업의 내용(원문 → 청크 → 임베딩 → pgvector).
   # API 서버와 같은 이미지에 명령만 다르다. 테이블은 이 컨테이너가 DB에 직접 쓴다(FastAPI 소유).

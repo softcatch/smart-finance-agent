@@ -16,6 +16,11 @@ from app.history import ASK_PERIOD
 from app.main import app, get_graph
 from app.spring import RecipientNotFound
 from app.transfer import TransferSlots
+from tests.tokens import bearer
+
+# Spring에 그대로 넘어가는지 볼 토큰. 회원은 같고 발급 시각(iat)만 달라 값이 다르다.
+TOKEN_1 = bearer("7", iat=1)
+TOKEN_2 = bearer("7", iat=2)
 
 CARD = {
     "requestId": "tr_7f3a",
@@ -158,7 +163,9 @@ def test_엔드포인트_봉투():
         FakeListChatModel(responses=["답변입니다"]), _plain()
     )
     try:
-        res = TestClient(app).post("/internal/chat", json={"threadId": "th_1", "message": "안녕"})
+        res = TestClient(app, headers={"Authorization": bearer()}).post(
+            "/internal/chat", json={"threadId": "th_1", "message": "안녕"}
+        )
     finally:
         app.dependency_overrides.clear()
 
@@ -195,7 +202,7 @@ def test_엔드포인트도_threadId별로_분리된다():
     graph = build_graph(llm, _plain())
     app.dependency_overrides[get_graph] = lambda: graph  # 같은 그래프 = 같은 체크포인터
     try:
-        client = TestClient(app)
+        client = TestClient(app, headers={"Authorization": bearer()})
         for thread_id, message in [
             ("th_1", "내 이름은 진호야"),
             ("th_2", "내 이름 뭐야?"),
@@ -226,7 +233,7 @@ def test_개인정보는_기록에_가린_채로만_남는다():
     graph = build_graph(llm, _plain())
     app.dependency_overrides[get_graph] = lambda: graph
     try:
-        client = TestClient(app)
+        client = TestClient(app, headers={"Authorization": bearer()})
         for message in [
             "카드 1234-5678-9012-3456 주민 900101-1234567 확인해줘",
             "방금 말한 거 다시",
@@ -376,9 +383,9 @@ def test_엔드포인트_확인_카드를_돌려주고_JWT는_기록에_남지_�
     )
     app.dependency_overrides[get_graph] = lambda: graph
     try:
-        res = TestClient(app).post(
+        res = TestClient(app, headers={"Authorization": bearer()}).post(
             "/internal/chat",
-            headers={"Authorization": "Bearer jwt-secret-1"},
+            headers={"Authorization": TOKEN_1},
             json={"threadId": "th_1", "message": "엄마한테 1만원 보내줘"},
         )
     finally:
@@ -386,8 +393,10 @@ def test_엔드포인트_확인_카드를_돌려주고_JWT는_기록에_남지_�
 
     assert res.status_code == 200
     assert res.json()["data"] == {"reply": CARD_REPLY, "guard": "PASS", "transferCard": CARD}
-    assert calls == [("jwt-secret-1", {"amount": 10000, "alias": "엄마"})]
-    assert "jwt-secret-1" not in repr(vars(graph.checkpointer))  # JWT가 대화 기록에 없다
+    assert calls == [(TOKEN_1.removeprefix("Bearer "), {"amount": 10000, "alias": "엄마"})]
+    assert TOKEN_1.removeprefix("Bearer ") not in repr(
+        vars(graph.checkpointer)
+    )  # JWT가 대화 기록에 없다
 
 
 def test_내역을_물으면_Spring_합계로_답하고_LLM은_부르지_않는다(monkeypatch):
@@ -481,9 +490,9 @@ def test_엔드포인트_내역_조회는_JWT를_전달하고_카드를_내리�
     )
     app.dependency_overrides[get_graph] = lambda: graph
     try:
-        res = TestClient(app).post(
+        res = TestClient(app, headers={"Authorization": bearer()}).post(
             "/internal/chat",
-            headers={"Authorization": "Bearer jwt-secret-2"},
+            headers={"Authorization": TOKEN_2},
             json={"threadId": "th_1", "message": "지난달 얼마 보냈어?"},
         )
     finally:
@@ -494,8 +503,10 @@ def test_엔드포인트_내역_조회는_JWT를_전달하고_카드를_내리�
     assert data["guard"] == "PASS"
     assert "보낸 금액은 120,000원" in data["reply"]
     assert "transferCard" not in data
-    assert calls == [("jwt-secret-2", date(2026, 9, 1), date(2026, 9, 30))]
-    assert "jwt-secret-2" not in repr(vars(graph.checkpointer))  # JWT가 대화 기록에 없다
+    assert calls == [(TOKEN_2.removeprefix("Bearer "), date(2026, 9, 1), date(2026, 9, 30))]
+    assert TOKEN_2.removeprefix("Bearer ") not in repr(
+        vars(graph.checkpointer)
+    )  # JWT가 대화 기록에 없다
 
 
 def _fin(op=(6_685_272_000_000, 6_606_009_000_000)):
@@ -684,7 +695,7 @@ def test_엔드포인트는_표를_돌려주고_없으면_필드를_내리지_�
     )
     app.dependency_overrides[get_graph] = lambda: graph
     try:
-        client = TestClient(app)
+        client = TestClient(app, headers={"Authorization": bearer()})
         first = client.post("/internal/chat", json={"threadId": "th_1", "message": "삼성전자 실적"})
         second = client.post("/internal/chat", json={"threadId": "th_1", "message": "안녕"})
     finally:
@@ -996,7 +1007,7 @@ def test_엔드포인트는_출처가_붙은_답변을_돌려준다(monkeypatch)
     graph = build_graph(_spy()[0], _business("삼성전자"))
     app.dependency_overrides[get_graph] = lambda: graph
     try:
-        res = TestClient(app).post(
+        res = TestClient(app, headers={"Authorization": bearer()}).post(
             "/internal/chat", json={"threadId": "th_1", "message": "삼성전자 사업 내용"}
         )
     finally:
@@ -1118,7 +1129,9 @@ def test_엔드포인트는_교체된_답변과_판정_코드를_돌려준다():
     graph = build_graph(_says("삼성전자를 지금 매수하세요")[0], _plain())
     app.dependency_overrides[get_graph] = lambda: graph
     try:
-        res = TestClient(app).post("/internal/chat", json={"threadId": "th_1", "message": "살까?"})
+        res = TestClient(app, headers={"Authorization": bearer()}).post(
+            "/internal/chat", json={"threadId": "th_1", "message": "살까?"}
+        )
     finally:
         app.dependency_overrides.clear()
 
@@ -1340,7 +1353,7 @@ def test_숫자_판정은_턴마다_새로_한다():
 def _post(message: str, graph, thread_id: str = "th_1"):
     app.dependency_overrides[get_graph] = lambda: graph
     try:
-        return TestClient(app).post(
+        return TestClient(app, headers={"Authorization": bearer()}).post(
             "/internal/chat", json={"threadId": thread_id, "message": message}
         )
     finally:
@@ -1614,3 +1627,28 @@ def test_내역_답변의_상대방_실명은_화면에만_있고_대화_기록�
     assert "[이름]에게 120,000원 보냄" in out["messages"][-1].content
     assert not any(name in text for call in seen for text in call for name in ("이철수", "김영희"))
     assert any("[이름]에게" in text for text in seen[0])  # 기록은 자리표시자로 간다
+
+
+def test_확인하지_못한_토큰은_401이고_그래프를_돌리지_않는다():
+    llm, seen = _spy()
+    graph = build_graph(llm, _plain())
+    app.dependency_overrides[get_graph] = lambda: graph
+    forged = bearer("7").rsplit(".", 1)[0] + "." + bearer("8").rsplit(".", 1)[1]
+    try:
+        client = TestClient(app)
+        body = {"threadId": "th_1", "message": "안녕"}
+        responses = [
+            client.post("/internal/chat", json=body),  # 헤더 없음
+            client.post("/internal/chat", json=body, headers={"Authorization": forged}),
+        ]
+    finally:
+        app.dependency_overrides.clear()
+
+    assert [res.status_code for res in responses] == [401, 401]
+    assert responses[1].json() == {
+        "success": False,
+        "data": None,
+        "error": {"code": "AUTH_INVALID", "message": "인증에 실패했습니다"},
+    }
+    assert seen == []  # LLM을 부르지 않았다
+    assert list(graph.checkpointer.list(None)) == []  # 대화 기록도 없다

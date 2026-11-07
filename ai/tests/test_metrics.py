@@ -38,7 +38,11 @@ def test_채팅_한_턴이_HTTP_지연과_노드_시간과_가드_판정을_남�
         _value("guard_decisions_total", where="chat", code="PASS"),
     )
     try:
-        TestClient(app).post("/internal/chat", json={"threadId": "th_m", "message": "안녕"})
+        TestClient(app).post(
+            "/internal/chat",
+            json={"threadId": "th_m", "message": "안녕"},
+            headers={"Authorization": BEARER_7},
+        )
     finally:
         app.dependency_overrides.clear()
 
@@ -240,7 +244,6 @@ def test_채팅_한_턴의_모든_LLM_호출이_요청한_회원의_ID로_남는
     try:
         TestClient(app).post("/internal/chat", json=body, headers={"Authorization": BEARER_7})
         TestClient(app).post("/internal/chat", json=body, headers={"Authorization": BEARER_8})
-        TestClient(app).post("/internal/chat", json=body)  # 사용자를 모르면 남기지 않는다
     finally:
         app.dependency_overrides.clear()
 

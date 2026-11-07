@@ -220,6 +220,29 @@ def member_id(authorization: str | None) -> int | None:
         return None
 
 
+class AuthInvalid(Exception):
+    pass
+
+
+# 채팅·상세 보기의 입구. 확인하지 못한 토큰은 그래프·LLM에 닿기 전에 401로 끝낸다(I-01·I-02 AUTH_INVALID).
+def member(authorization: Annotated[str | None, Header()] = None) -> int:
+    if (user_id := member_id(authorization)) is None:
+        raise AuthInvalid
+    return user_id
+
+
+@app.exception_handler(AuthInvalid)
+def auth_invalid(request: Request, exc: AuthInvalid) -> JSONResponse:
+    return JSONResponse(
+        status_code=401,
+        content={
+            "success": False,
+            "data": None,
+            "error": {"code": "AUTH_INVALID", "message": "인증에 실패했습니다"},
+        },
+    )
+
+
 class ChatRequest(BaseModel):
     threadId: str  # 체크포인터의 thread_id — 같은 값이면 같은 대화(FR-015)
     message: str
@@ -229,6 +252,7 @@ class ChatRequest(BaseModel):
 def chat(
     req: ChatRequest,
     background: BackgroundTasks,
+    user_id: Annotated[int, Depends(member)],  # 토큰부터 본다
     graph: Annotated[Any, Depends(get_graph)],
     authorization: Annotated[str | None, Header()] = None,
 ) -> dict:
@@ -244,7 +268,7 @@ def chat(
             "search_business": search_business,
         },
         # 이 요청의 LLM 호출마다 이 사용자의 사용량을 남긴다(NFR-054). 그래프 안의 호출까지 이어진다.
-        "metadata": {"user_id": member_id(authorization)},
+        "metadata": {"user_id": user_id},
     }
     # 노드가 끝날 때마다 걸린 시간을 잰다(updates). 마지막 values가 최종 상태다.
     # 같은 노드를 두 번 지나면(재검색, NFR-052) 시간을 더한다.
@@ -279,8 +303,8 @@ def chat(
 @app.get("/internal/details/{detail_id}")
 def detail(
     detail_id: str,
+    user_id: Annotated[int, Depends(member)],
     llm: Annotated[Any, Depends(get_llm)],
-    authorization: Annotated[str | None, Header()] = None,
 ):
     with _connect() as conn:
         condition = load_detail(conn, detail_id)
@@ -301,9 +325,7 @@ def detail(
     table = build_detail_table(companies, rows)
     if table is None:
         return {"success": True, "data": {"report": NO_DATA_REPORT}, "error": None}
-    report, evidence = write_report(
-        llm.with_config(metadata={"user_id": member_id(authorization)}), table
-    )
+    report, evidence = write_report(llm.with_config(metadata={"user_id": user_id}), table)
     code = check_output(report, unverified_numbers(report, evidence))
     GUARD.labels("detail", code).inc()
     if code != "PASS":  # 표에는 '아래 출처'가 없어 숫자 판정 문장만 표 기준으로 바꾼다
