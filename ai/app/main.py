@@ -1,11 +1,10 @@
-import base64
-import json
 import os
 from functools import lru_cache, partial
 from time import perf_counter
 from typing import Annotated, Any
 from uuid import uuid4
 
+import jwt
 import openai
 import psycopg
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, Request, Response
@@ -208,12 +207,16 @@ def issue_detail(detail: dict) -> str | None:
     return detail_id
 
 
-# Spring이 이미 서명을 확인해 넘긴 JWT의 sub(회원 ID). 내부 전용이라 서명은 다시 보지 않는다. 못 읽으면 None.
+# JWT의 sub(회원 ID). Spring과 같은 키(SMART_JWT_SECRET)로 서명·만료를 다시 확인한다 — 내부 망 위치만 믿지 않는다.
+# 알고리즘은 HS256만 받는다(none 등 거부). 키가 없거나 토큰이 틀리면 None.
 def member_id(authorization: str | None) -> int | None:
+    secret = os.environ.get("SMART_JWT_SECRET")
+    if not secret:
+        return None
     try:
-        payload = (authorization or "").removeprefix("Bearer ").split(".")[1]
-        return int(json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["sub"])
-    except (IndexError, ValueError, KeyError, TypeError):
+        token = (authorization or "").removeprefix("Bearer ")
+        return int(jwt.decode(token, secret, algorithms=["HS256"])["sub"])
+    except (jwt.InvalidTokenError, KeyError, ValueError, TypeError):
         return None
 
 

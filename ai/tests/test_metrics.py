@@ -16,10 +16,10 @@ from app.graph import build_graph
 from app.main import app, get_graph
 from app.metrics import LlmMetrics
 from app.transfer import TransferSlots
+from tests.tokens import bearer
 
-# sub가 "7"·"8"인 JWT 모양(헤더.payload.서명). 서명은 FastAPI가 보지 않는다.
-BEARER_7 = "Bearer h.eyJzdWIiOiI3In0.s"
-BEARER_8 = "Bearer h.eyJzdWIiOiI4In0.s"
+BEARER_7 = bearer("7")
+BEARER_8 = bearer("8")
 
 
 def _value(name: str, **labels) -> float:

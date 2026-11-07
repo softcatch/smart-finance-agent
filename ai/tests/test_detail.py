@@ -10,6 +10,7 @@ from app.financial import NO_DATA_REPORT, REPORT_UNVERIFIED, build_detail_table
 from app.guard import CANARY, OUTPUT_REPLIES
 from app.metrics import LlmMetrics
 from app.store import save_detail, upsert_companies, upsert_financials
+from tests.tokens import bearer
 
 
 def _row(stock, year, reprt, account, amount, prev, fs_div="CFS"):
@@ -154,6 +155,6 @@ def test_보고서_호출도_요청한_회원의_ID로_남는다(seeded):
         callbacks=[LlmMetrics(lambda *args: users.append(args[0]))],
     )
 
-    _get("dt_ok", llm, "Bearer h.eyJzdWIiOiI3In0.s")  # sub가 "7"인 JWT 모양
+    _get("dt_ok", llm, bearer("7"))
 
     assert users == [7]
