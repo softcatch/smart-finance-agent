@@ -6,6 +6,7 @@ import com.softcatch.smart.alias.AliasRepository;
 import com.softcatch.smart.auth.MemberRepository;
 import com.softcatch.smart.common.ApiException;
 import com.softcatch.smart.common.ErrorCode;
+import com.softcatch.smart.common.NameMask;
 import com.softcatch.smart.notification.NotificationService;
 import com.softcatch.smart.transfer.dto.request.TransferCreateRequest;
 import com.softcatch.smart.transfer.dto.response.TransferConfirmResponse;
@@ -94,9 +95,10 @@ class TransferService {
             request.amount(),
             expiresAt));
 
+    // 확인 카드(I-03 → E-11)는 돈이 나가기 전이라 이름을 가린다. 저장·확정 결과·내역은 실명이다.
     return new TransferCreateResponse(
         requestId,
-        recipientName,
+        NameMask.mask(recipientName),
         targetAccountNumber,
         fromAccount.getAccountNumber(),
         request.amount(),
