@@ -7,6 +7,7 @@ import pytest
 from langchain_core.runnables import RunnableLambda
 
 from app import main
+from app.main import advice_embed as real_advice_embed
 from app.main import log_chat as real_log_chat
 from app.store import replace_business_chunks, upsert_companies
 from app.transfer import TransferSlots
@@ -179,3 +180,19 @@ def test_키가_없으면_회원_ID를_읽지_않는다(monkeypatch):
     monkeypatch.delenv("SMART_JWT_SECRET")
 
     assert main.member_id(bearer("7")) is None
+
+
+def test_투자_권유_임베딩은_짧게_끊고_재시도하지_않는다(monkeypatch):
+    seen = {}
+
+    class FakeEmbeddings:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+        def embed_documents(self, texts):
+            return [[1.0] for _ in texts]
+
+    monkeypatch.setattr("app.business.OpenAIEmbeddings", FakeEmbeddings)
+
+    assert real_advice_embed(["문장"]) == [[1.0]]
+    assert (seen["timeout"], seen["max_retries"]) == (main.ADVICE_EMBED_TIMEOUT, 0)

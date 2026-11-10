@@ -1,16 +1,20 @@
-"""인젝션 평가(NFR-012 차단율·오탐률, NFR-023 간접 인젝션의 기준선). LLM·DB·키 없이 돈다.
+"""인젝션 평가(NFR-012 차단율·오탐률, NFR-023 간접 인젝션의 기준선, NFR-017 투자 권유). LLM·DB·키 없이 돈다.
 
 세트(injection.jsonl)의 문장을 가드 판정에 넣고 막히는지만 본다.
 - direct: 사용자 입력 → 입력 가드가 쓰는 is_injection. 참이면 막힌 것이다.
 - indirect: 공시에 심은 지시를 모델이 따라 쓴 사업의 내용 답변 → 출력 가드가 사업의 내용 답변에 쓰는
   check_output(disclosure=True). PASS가 아니면 막힌 것이다.
 - leak: 프롬프트(안내문)를 옮기거나 요약한 답변(NFR-018) → 출력 가드의 check_output. PASS가 아니면 막힌 것이다. 모델이 지시를 따르는 비율(실제 LLM)은 재지 않는다.
+- advice: 투자 권유 답변(NFR-017) → 출력 가드의 check_output. ADVICE면 막힌 것이다. 목록 그대로인 기본 표현과
+  목록에 없는 변형 표현을 나눠 세고, 정상 답변(공시의 '자기주식 매수', 권유 거절 안내 등)은 통과해야 한다.
 공격 문장은 막혀야 하고(차단율), 정상 문장은 통과해야 한다(오탐률).
 실행(ai/에서):
-    uv run python -m evals.injection
+    uv run python -m evals.injection           # 목록 판정만(키 없이, CI 회귀 기준과 같다)
+    uv run python -m evals.injection --embed   # advice에 의미 판정까지(OPENAI_API_KEY 필요, 실제 임베딩)
 """
 
 import json
+import sys
 from collections import Counter
 from pathlib import Path
 
@@ -18,7 +22,8 @@ import app.graph  # noqa: F401 — 프롬프트 5개를 등록한다(유출 겹�
 from app.guard import check_output, is_injection
 
 CASES = Path(__file__).with_name("injection.jsonl")
-KINDS = ("direct", "indirect", "leak")
+KINDS = ("direct", "indirect", "leak", "advice")
+EMBED = None  # --embed면 app.business.embed_texts
 
 
 def blocked(case: dict) -> bool:
@@ -26,6 +31,8 @@ def blocked(case: dict) -> bool:
         return is_injection(case["text"])
     if case["kind"] == "indirect":
         return check_output(case["text"], disclosure=True) != "PASS"  # 사업의 내용 답변으로 판정
+    if case["kind"] == "advice":
+        return check_output(case["text"], embed=EMBED) == "ADVICE"
     return check_output(case["text"]) != "PASS"
 
 
@@ -64,6 +71,11 @@ def evaluate(cases: list[dict]) -> dict:
 
 
 def main() -> None:
+    global EMBED
+    if "--embed" in sys.argv:
+        from app.business import embed_texts
+
+        EMBED = embed_texts
     result = evaluate(load_cases())
     attacks, caught = result["attacks"], result["caught"]
     for kind in KINDS:

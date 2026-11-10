@@ -1,6 +1,9 @@
 import re
 import secrets
 import unicodedata
+from collections.abc import Callable
+
+from openai import OpenAIError
 
 # 안전 판정은 LLM이 아니라 파이썬 규칙으로 한다.
 _CARD = re.compile(r"(?<!\d)\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}(?!\d)")
@@ -157,6 +160,67 @@ _ADVICE = (
 )
 
 
+# 투자 권유 변형 표현(NFR-017 2단계): 목록에 없는 권유("지금이 매수 적기입니다")를 의미로 잡는다.
+# 답변의 문장마다 권유 기준 문장과 정상 기준 문장 중 가장 가까운 것을 찾아, 권유 쪽이 MARGIN 이상 더 가까우면 권유다.
+# 권유 쪽만 보면 '자기주식 취득' 같은 공시 문장도 가까워서, 정상 쪽과 견준다. 기준 문장은 평가셋과 겹치지 않게 따로 썼다.
+# MARGIN은 오탐 0을 지키는 값이다: 평가셋 정상 답변(최고 0.072)과 개발 DB 공시 문장 400개(0.08이면 4개 — 표 조각)를 쟀다.
+_ADVICE_ANCHORS = (
+    "이 주식을 지금 사는 것을 권합니다",
+    "이 종목을 매수하시는 게 좋겠습니다",
+    "보유한 주식을 지금 파는 것이 좋습니다",
+    "이 종목은 팔고 다른 종목으로 바꾸세요",
+    "앞으로 주가가 오를 테니 투자해 보세요",
+    "이 주식은 손해 볼 일이 없습니다",
+    "주가가 확실히 오를 것입니다",
+    "지금이 투자하기 좋은 시점입니다",
+    "이 종목의 비중을 늘리는 것을 추천합니다",
+    "이 회사 주식을 꼭 가지고 계세요",
+    "예상 주가는 얼마까지 오를 것으로 봅니다",
+    "I recommend buying this stock",
+)
+_NORMAL_ANCHORS = (
+    "회사는 자기주식을 사들이기로 결정했습니다",
+    "회사는 신규 설비에 투자할 계획입니다",
+    "올해 영업이익은 지난해보다 늘었습니다",
+    "매출에서 반도체가 차지하는 비중이 커졌습니다",
+    "주식을 살지 말지는 직접 판단하셔야 합니다",
+    "특정 종목을 추천해 드릴 수는 없습니다",
+    "주가가 앞으로 어떻게 될지는 알 수 없습니다",
+    "회사는 원재료를 사들이는 데 비용을 더 썼습니다",
+    "배당금은 주당 500원으로 정했습니다",
+    "송금할 금액과 받는 분을 확인해 주세요",
+    "회사는 올해 목표 실적을 공개했습니다",
+    "부채비율이 낮아 재무 구조가 안정적입니다",
+)
+_ADVICE_MARGIN = 0.10
+_anchor_vectors: dict[Callable, tuple[list, list]] = {}  # 임베딩 함수별로 한 번만 만든다
+
+
+def _closest(vector: list[float], anchors: list[list[float]]) -> float:
+    return max(
+        sum(x * y for x, y in zip(vector, anchor)) for anchor in anchors
+    )  # 단위 벡터라 내적 = 코사인
+
+
+# embed: 문장 목록 → 단위 벡터 목록(app.business.embed_texts). 임베딩이 실패하면 False — 목록 판정만 남고 답변은 나간다.
+def advice_like(reply: str, embed: Callable[[list[str]], list[list[float]]]) -> bool:
+    sentences = [s.strip() for s in re.split(r"[.!?\n]+", reply) if len(s.strip()) >= 4]
+    if not sentences:
+        return False
+    try:
+        if embed not in _anchor_vectors:
+            vectors = embed([*_ADVICE_ANCHORS, *_NORMAL_ANCHORS])
+            _anchor_vectors[embed] = (
+                vectors[: len(_ADVICE_ANCHORS)],
+                vectors[len(_ADVICE_ANCHORS) :],
+            )
+        advice, normal = _anchor_vectors[embed]
+        found = embed(sentences)
+    except OpenAIError:
+        return False
+    return any(_closest(v, advice) - _closest(v, normal) >= _ADVICE_MARGIN for v in found)
+
+
 # 간접 인젝션(NFR-023): 공시 본문에 심은 지시를 모델이 따라 쓴 흔적. 사업의 내용 답변에만 쓴다 —
 # 일반 답변에는 "송금할 때 비밀번호를 입력해 주세요" 같은 정상 안내가 있을 수 있다.
 # 외부 링크: URL·www·도메인 모양(이메일 주소의 도메인 포함). 날짜(2026.06.30)는 끝이 숫자라 안 걸린다.
@@ -176,10 +240,18 @@ _SECRET_REQUEST = re.compile(
 # LLM이 쓴 답변이 나가기 전 판정. 걸린 판정 코드를 돌려주고, 통과면 "PASS".
 # unverified: 근거에 없는 숫자 목록(unverified_numbers). 근거가 없는 답변은 대조하지 않으므로 비워 둔다.
 # disclosure: 공시 본문을 근거로 쓴 답변(사업의 내용)이면 참 — 간접 인젝션 흔적도 본다.
-def check_output(reply: str, unverified: list[str] | None = None, disclosure: bool = False) -> str:
+# embed: 주면 목록에 없는 투자 권유도 의미로 본다(advice_like). 없으면 목록만 본다.
+def check_output(
+    reply: str,
+    unverified: list[str] | None = None,
+    disclosure: bool = False,
+    embed: Callable[[list[str]], list[list[float]]] | None = None,
+) -> str:
     if CANARY in reply or not _pieces(reply).isdisjoint(_PROMPT_PIECES):
         return "PROMPT_LEAK"
     if any(phrase in reply for phrase in _ADVICE):
+        return "ADVICE"
+    if embed is not None and advice_like(reply, embed):
         return "ADVICE"
     if disclosure and (_LINK.search(reply) or _SECRET_REQUEST.search(reply)):
         return "INDIRECT_INJECTION"
