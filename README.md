@@ -6,9 +6,9 @@ AI 채팅으로 송금하고, DART 공시를 검색·분석하는 서비스.
 |---|---|---|
 | **S** | Sending | 송금 |
 | **M** | Management | 송금 내역 조회 |
-| **A** | AI & Analysis | LangGraph 기반 AI 분석 |
-| **R** | RAG & Retrieval | DART 공시 데이터 검색·RAG |
-| **T** | Transfer | 공시 데이터 전송·송금 업무 |
+| **A** | Analysis | 재무 분석 |
+| **R** | Retrieval | 공시 검색(RAG) |
+| **T** | Trust | 안전 검사(개인정보 가림·AI 입출력 검사·송금 확정 검사) |
 
 **기술 스택**: JSP · Spring Boot 4.1.1(Java 17, JPA, JWT) · FastAPI + LangGraph · OpenAI · PostgreSQL + pgvector · Docker Compose
 
